@@ -1,0 +1,24 @@
+# astra-sre 设备清单（示例模板）
+# 请复制为 devices.yaml 并填入实际数据
+
+devices:
+  - name: example-server
+    role: 核心服务器
+    desc: 你的服务器描述
+    os: Ubuntu 24.04
+    ssh: user@your-server-ip
+    key: id_ed25519
+    checks:
+      - systemd: [sshd, nginx]
+      - port: [22, 80, 443]
+      - disk_warn: 85
+      - disk_crit: 92
+
+  - name: example-nas
+    role: 存储
+    desc: 你的 NAS 描述
+    os: DSM 7.x
+    ssh: user@nas-ip
+    checks:
+      - disk_warn: 85
+      - disk_crit: 92
