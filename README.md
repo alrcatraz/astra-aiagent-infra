@@ -1,83 +1,77 @@
 # Astra AI Agent Infrastructure (astra-aiagent-infra)
 
-> Hermes Agent 生态门户 — 技能 · 运维框架 · MCP 服务 · 教程  
-> 配套《Hermes Agent 进阶教程》卷三使用
+> Hermes Agent ecosystem portal — Skills · SRE framework · MCP services · Tutorials
+> Companion for *Hermes Agent Advanced Tutorial* Vol. III
 
 ---
 
-## 🏛️ 这是什么
+## 🏛️ What Is This
 
-这不是一个传统的"代码仓库"——它是一个**生态门户**。
+This is not a traditional "code repository" — it is an **ecosystem portal**.
 
-打开 [`registry.yaml`](registry.yaml)，你就能一览我为 Hermes Agent 构建的所有成果：
+Open [`registry.yaml`](registry.yaml) to see an overview of everything built for Hermes Agent:
 
 ```yaml
-# 一个文件 = 整个生态的全景
-tutorials: 从零开始的 Hermes Agent 教程
-skills:    流程保障技能集
-sre:       统一运维协调层
-mcps:      MCP 扩展服务
+tutorials: Hermes Agent from scratch (3 volumes)
+skills:    Workflow enforcement skill set
+sre:       Unified SRE coordination layer
+mcps:      MCP extension services
 ```
 
-每个组件都在**独立的仓库**中维护，有自己的版本迭代节奏。
+Every component lives in its **own repository** with its own versioning and release cadence.
 
 ---
 
-## 📋 组件一览
+## 📋 Component Overview
 
-| 类别 | 组件 | 独立仓库 | 状态 |
-|:-----|:-----|:---------|:----:|
-| 📘 教程 | Hermes Agent 教程（三卷） | `alrcatraz/hermes-agent-tutorial` | 🟢 规划中 |
-| 🔧 技能 | pre-action-research | `alrcatraz/astra-skill-pre-action-research` | 🟢 活动 |
-| 🔧 技能 | change-safeguard | `alrcatraz/astra-skill-change-safeguard` | 🟢 活动 |
-| 🔧 技能 | deploy-register | `alrcatraz/astra-skill-deploy-register` | 🟢 活动 |
-| 🔧 技能 | work-closure-check | `alrcatraz/astra-skill-work-closure-check` | 🟢 活动 |
-| 🛡️ SRE | astra-sre 协调层 | `alrcatraz/astra-sre` | 🟢 活动 |
-| 🔌 MCP | astra-knowledge-base | `alrcatraz/astra-knowledge-base-mcp` | 🟢 活动 |
-| 🔌 MCP | astra-time | 内置 (Hermes) | 🟢 活动 |
-| 🔌 MCP | astra-markitdown | 内置 (Hermes) | 🟢 活动 |
+| Category | Component | Repository | Status |
+|:---------|:----------|:-----------|:------:|
+| 📘 Tutorial | Hermes Agent Tutorial (3 vols) | `alrcatraz/hermes-agent-tutorial` | 🟡 Planning |
+| 🔧 Skill | pre-action-research | `alrcatraz/astra-skill-pre-action-research` | 🟢 Active |
+| 🔧 Skill | change-safeguard | `alrcatraz/astra-skill-change-safeguard` | 🟢 Active |
+| 🔧 Skill | deploy-register | `alrcatraz/astra-skill-deploy-register` | 🟢 Active |
+| 🔧 Skill | work-closure-check | `alrcatraz/astra-skill-work-closure-check` | 🟢 Active |
+| 🛡️ SRE | astra-sre coordination layer | `alrcatraz/astra-sre` | 🟢 Active |
+| 🔌 MCP | astra-knowledge-base | `alrcatraz/astra-knowledge-base-mcp` | 🟢 Active |
 
-> 完整信息（含描述、transport 类型等）→ [`registry.yaml`](registry.yaml)
+> Full details (descriptions, transport types, etc.) → [`registry.yaml`](registry.yaml)
 
 ---
 
-## 🚀 开始使用
+## 🚀 Getting Started
 
-### 想用某套技能？
+### Want to use a skill?
 
 ```bash
-# 复制想要的 skill 到你的 Hermes 目录
-cp -r skills/change-safeguard ~/.hermes/skills/
-# 或从独立仓库拉取
+# Clone from the component's own repository
 git clone https://github.com/alrcatraz/astra-skill-change-safeguard.git
+cp -r astra-skill-change-safeguard ~/.hermes/skills/change-safeguard
 ```
 
-### 想用 MCP 服务？
+### Want to use an MCP service?
 
-对应独立仓库的 README 中有详细的安装和配置说明。
+Each component's README contains detailed installation and configuration instructions.
 
-### 想跟着教程学？
+### Want to follow the tutorial?
 
-请关注 [`alrcatraz/hermes-agent-tutorial`](https://github.com/alrcatraz/hermes-agent-tutorial)（即将发布）。
+Watch [`alrcatraz/hermes-agent-tutorial`](https://github.com/alrcatraz/hermes-agent-tutorial) (coming soon).
 
 ---
 
-## 🧭 目录结构
+## 🧭 Directory Structure
 
 ```
 astra-aiagent-infra/
-├── registry.yaml            ← ☝️ 核心入口：生态全景图
-├── skills/                  ← 技能代码（待提取独立仓库）
-├── astra-sre/               ← SRE 模块代码（待提取独立仓库）
-├── mcp/                     ← MCP 设计文档
-├── templates/               ← 新建组件的脚手架模板
-├── docs/                    ← 跨组件的设计规范与指南
+├── registry.yaml            ← ☝️ Core entry: ecosystem overview
+├── mcp/                     ← MCP design documents
+├── templates/               ← Scaffolding templates for new components
+├── docs/                    ← Cross-component design standards & guides
 ├── .gitignore
 └── LICENSE
 ```
 
 ---
 
-## 🤝 许可证
+## 🤝 License
 
 MIT © 2026 Nanaly

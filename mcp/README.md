@@ -1,12 +1,12 @@
-# MCP 服务
+# MCP Services
 
-此目录是 astra-aiagent-infra 生态中 **MCP 服务** 的设计与规范入口。
+This directory serves as the design and standards entry point for **MCP services** within the astra-aiagent-infra ecosystem.
 
-实际代码在各独立仓库中（如 `astra-knowledge-base-mcp`），详见 [`registry.yaml`](../registry.yaml)。
+Actual code lives in each standalone repository (e.g. `astra-knowledge-base-mcp`). See [`registry.yaml`](../registry.yaml) for details.
 
 ---
 
-## 内容
+## Contents
 
-- 设计规范 → [`docs/design-principles.md`](../docs/design-principles.md)
-- MCP 注册表 → [`registry.yaml`](../registry.yaml) 中 `type: mcp` 条目
+- Design standards → [`docs/design-principles.md`](../docs/design-principles.md)
+- MCP registry → entries with `type: mcp` in [`registry.yaml`](../registry.yaml)
