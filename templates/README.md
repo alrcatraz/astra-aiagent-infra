@@ -1,19 +1,19 @@
-# 新建 astra 组件模板
+# New Astra Component Template
 
-使用此模板快速创建新的 astra 生态组件。
+Use this template to quickly bootstrap a new astra ecosystem component.
 
-## 用法
+## Usage
 
 ```bash
-# 创建新 skill
+# Create a new skill
 ./templates/new-component.sh skill astra-skill-my-fancy-thing
 
-# 创建新 MCP 服务
+# Create a new MCP service
 ./templates/new-component.sh mcp astra-my-service-mcp
 ```
 
-## 输出
+## Output
 
-- 在 `~/Projects/astra/` 下创建独立仓库目录
-- 生成基本文件结构
-- 追加到 `registry.yaml`
+- Creates a standalone repository directory under `~/Projects/astra/`
+- Generates the basic file structure
+- Appends the entry to `registry.yaml`
