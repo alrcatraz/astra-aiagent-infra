@@ -1,35 +1,35 @@
-# 设计原则
+# Design Principles
 
-贯穿 astra-aiagent-infra 生态所有组件的一致原则。
+Consistent principles that apply across all components of the astra-aiagent-infra ecosystem.
 
 ---
 
-## 1. 独立性
+## 1. Independence
 
-每个组件拥有独立仓库、独立版本号、独立发布周期。  
-`astra-aiagent-infra` 只做索引和治理，不做集中式代码管理。
+Each component has its own repository, its own version number, and its own release cadence.
+`astra-aiagent-infra` acts as an index and governance layer — not a centralized code manager.
 
-## 2. 可组合性
+## 2. Composability
 
-组件之间通过标准接口（MCP stdio transport、Hermes skill 扫描机制、CLI 管道）协作，不产生硬耦合。
+Components communicate through standard interfaces (MCP stdio transport, Hermes skill scanning mechanism, CLI pipelines) with no hard coupling.
 
-## 3. 自描述
+## 3. Self-Describing
 
-每个组件在 `registry.yaml` 中有完整记录。别人看到注册表就能判断"这个组件适不适合我"。
+Every component is fully documented in `registry.yaml`. Anyone reading the registry can determine at a glance whether a component fits their needs.
 
-## 4. 跨平台优先
+## 4. Cross-Platform First
 
-文档和工具优先覆盖 Linux（RHEL 系 / Debian 系 / SUSE 系），其次考虑 macOS / NixOS。  
-代码本身尽量使用标准 Python / Shell，不依赖特定发行版特性。
+Documentation and tools prioritize Linux (RHEL-family / Debian-family / SUSE-family), with secondary consideration for macOS / NixOS.
+Code itself targets standard Python and Shell wherever possible, avoiding distribution-specific features.
 
-## 5. 安全默认
+## 5. Security by Default
 
-- 凭证不硬编码，不放进仓库
-- SSH key 认证优先于密码
-- 服务绑定使用独立回环地址（127.0.0.x）
-- 变更前先保全，变更后扫描副作用
+- Credentials are never hardcoded or committed to repositories
+- SSH key authentication is preferred over passwords
+- Services bind to dedicated loopback addresses (127.0.0.x)
+- Always safeguard before changes; always scan for side effects after changes
 
-## 6. 渐进增强
+## 6. Progressive Enhancement
 
-组件可以从"够用"开始，逐步完善。  
-不必等所有功能齐全才发布——好过没有，完善超过完美。
+Components can start as "good enough" and improve over time.
+Don't wait for every feature to be finished before shipping — done beats perfect, iteration beats perfection.

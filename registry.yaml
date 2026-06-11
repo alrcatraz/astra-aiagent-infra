@@ -1,89 +1,69 @@
 # ══════════════════════════════════════════════════════════════
-# Astral Agent Infrastructure — 组件注册表
+# Astral Agent Infrastructure — Component Registry
 # ══════════════════════════════════════════════════════════════
 #
-# 这是 astra-aiagent-infra 的核心入口。
-# 读者只需看这一个文件，就能了解本项目全貌：
-# - 所有为 Hermes Agent 构建的工具、框架、教程
-# - 每个组件的独立仓库地址（可直接 clone / pip install）
-# - 组件的成熟度状态
+# This is the core entry point of astra-aiagent-infra.
+# One file to see the full picture:
+# - All tools, frameworks, and tutorials built for Hermes Agent
+# - Each component's standalone repository (clone / pip install)
+# - Maturity status of each component
 #
-# 每个组件应有独立仓库，有自己的版本迭代节奏。
-# 尚未提取的组件在 location 字段标记其当前路径。
+# Every component lives in its own repo with its own release cadence.
 
 meta:
   project: astra-aiagent-infra
   maintainer: Nanaly
   description: >
-    Hermes Agent 生态门户 — 记录所有技能、运维框架、
-    MCP 服务、教程的统一索引。
+    Hermes Agent ecosystem portal — a unified index of all skills,
+    SRE frameworks, MCP services, and tutorials.
   license: MIT
 
 components:
 
-  # ── 教程 ────────────────────────────────────────────────
+  # ── Tutorials ─────────────────────────────────────────────
   - type: tutorial
     name: hermes-agent-tutorial
     repo: alrcatraz/hermes-agent-tutorial
-    description: 从零开始的 Hermes Agent 教程（三卷）
+    description: Hermes Agent from scratch (3 volumes)
     lang: [zh-CN, en]
-    status: planned
+    status: active
 
-  # ── 技能 ────────────────────────────────────────────────
+  # ── Skills ────────────────────────────────────────────────
   - type: skill
     name: pre-action-research
     repo: alrcatraz/astra-skill-pre-action-research
-    description: 执行操作前强制调研与查索引
+    description: Mandatory research & index lookup before taking action
     status: active
-    location: skills/pre-action-research/
 
   - type: skill
     name: change-safeguard
     repo: alrcatraz/astra-skill-change-safeguard
-    description: 修改系统前强制执行的保全检查与事后扫描
+    description: Pre-change safeguarding checks & post-change side-effect scan
     status: active
-    location: skills/change-safeguard/
 
   - type: skill
     name: deploy-register
     repo: alrcatraz/astra-skill-deploy-register
-    description: 部署新服务后强制执行登记清单
+    description: Mandatory registration checklist after deploying a new service
     status: active
-    location: skills/deploy-register/
 
   - type: skill
     name: work-closure-check
     repo: alrcatraz/astra-skill-work-closure-check
-    description: 任务收尾时强制执行闭环检查清单
+    description: Mandatory closure checklist when wrapping up a task
     status: active
-    location: skills/work-closure-check/
 
-  # ── SRE 模块 ────────────────────────────────────────────
+  # ── SRE Modules ───────────────────────────────────────────
   - type: sre
     name: astra-sre
     repo: alrcatraz/astra-sre
-    description: 统一 SRE 协调层 — 设备巡检、故障诊断、自动修复
+    description: Unified SRE coordination layer — device inspection, fault diagnosis, auto-repair
     status: active
-    location: astra-sre/
 
-  # ── MCP 服务 ────────────────────────────────────────────
+  # ── MCP Services ──────────────────────────────────────────
   - type: mcp
     name: astra-knowledge-base
     repo: alrcatraz/astra-knowledge-base-mcp
-    description: 知识库检索 MCP 服务
-    transport: stdio
-    status: active
-
-  - type: mcp
-    name: astra-time
-    repo: built-in
-    description: 时间转换 MCP 服务（Hermes 内置）
-    transport: stdio
-    status: active
-
-  - type: mcp
-    name: astra-markitdown
-    repo: built-in
-    description: 文档转 Markdown MCP 服务（Hermes 内置）
+    description: Knowledge base retrieval MCP service
     transport: stdio
     status: active
