@@ -12,7 +12,7 @@
 
 meta:
   project: astra-aiagent-infra
-  maintainer: Nanaly
+  maintainer: alrcatraz
   description: >
     Hermes Agent ecosystem portal — a unified index of all skills,
     SRE frameworks, MCP services, and tutorials.
