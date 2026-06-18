@@ -20,50 +20,151 @@ meta:
 
 components:
 
+  # ── Executive framework ─────────────────────────────────
+  - type: skill
+    name: execution-framework
+    repo: alrcatraz/astra-skill-execution-framework
+    version: 2.0.0
+    description: >
+      Task classification and routing. Self-evolving: auto-detects new skills
+      via sync-routing.py and suggests routing table updates.
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: registry.yaml
+        required: optional
+        reason: Scanned by sync-routing.py to detect new skills for routing
+      - repo: alrcatraz/astra-skill-pre-action-research
+        required: optional
+        reason: Routed to when task type is research & plan
+      - repo: alrcatraz/astra-skill-change-safeguard
+        required: optional
+        reason: Routed to when task type is system modification
+      - repo: alrcatraz/astra-skill-deploy-register
+        required: optional
+        reason: Routed to when task type is service deployment
+      - repo: alrcatraz/astra-skill-work-closure-check
+        required: optional
+        reason: Routed to when task type is wrap-up & closure
+    lifecycle:
+      closure:
+        - id: ef-version-consistency
+          check: Verify version consistency across registry + local repos
+          command: "cd $ASTRA_EF_DIR && uv run scripts/sync-routing.py --verify-versions"
+          severity: recommended
+          trigger: registry.yaml or SKILL.md modified
+
   # ── Tutorials ─────────────────────────────────────────────
   - type: tutorial
     name: hermes-agent-tutorial
     repo: alrcatraz/hermes-agent-tutorial
+    version: 1.0.0
     description: Hermes Agent from scratch (3 volumes)
     lang: [zh-CN, en]
     status: active
+    depends_on: []
 
   # ── Skills ────────────────────────────────────────────────
   - type: skill
     name: pre-action-research
     repo: alrcatraz/astra-skill-pre-action-research
+    version: 1.0.0
     description: Mandatory research & index lookup before taking action
     status: active
+    depends_on:
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: docs/credential-schema.md
+        required: optional
+        reason: Credential storage conventions for the credential-check step
 
   - type: skill
     name: change-safeguard
     repo: alrcatraz/astra-skill-change-safeguard
+    version: 1.0.0
     description: Pre-change safeguarding checks & post-change side-effect scan
     status: active
+    depends_on: []
 
   - type: skill
     name: deploy-register
     repo: alrcatraz/astra-skill-deploy-register
+    version: 1.0.0
     description: Mandatory registration checklist after deploying a new service
     status: active
+    depends_on: []
 
   - type: skill
     name: work-closure-check
     repo: alrcatraz/astra-skill-work-closure-check
+    version: 1.1.0
     description: Mandatory closure checklist when wrapping up a task
     status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        resource: Two-Strike Rule (skill creation decision tree)
+        required: optional
+        reason: Decisions about skill creation vs patching during closure
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: docs/credential-schema.md
+        required: optional
+        reason: Credential leak scan references credential storage conventions
 
   # ── SRE Modules ───────────────────────────────────────────
   - type: sre
     name: astra-sre
     repo: alrcatraz/astra-sre
+    version: 1.0.0
     description: Unified SRE coordination layer — device inspection, fault diagnosis, auto-repair
     status: active
+    depends_on:
+      - repo: alrcatraz/astra-knowledge-base-mcp
+        resource: Shared SQLite database via ASTRA_KB_PATH
+        required: recommended
+        reason: Incident data layer — health-scan.py, triage.py, and learn.py share the same DB
+    lifecycle:
+      closure:
+        - id: sre-health-scan
+          check: Run health scan to verify device coverage after SRE changes
+          command: "cd $ASTRA_SRE_DIR && python3 scripts/health-scan.py --json"
+          severity: required
+          trigger: devices.yaml or health-scan.py modified
+        - id: sre-incident-kb
+          check: Update sre_incidents knowledge base with post-mortem after any repair
+          action: "kb_add(kb='sre_incidents', content=..., tags=...)"
+          severity: recommended
+          trigger: any SRE repair or incident occurred
+        - id: sre-config-sync
+          check: Verify devices.yaml is in sync with infrastructure-device-inventory
+          command: "diff <(python3 scripts/health-scan.py --json) <(cat config/devices.yaml)"
+          severity: recommended
+          trigger: devices.yaml modified
+      deploy:
+        - id: sre-device-register
+          check: Register new device in SRE config/devices.yaml
+          template: config/devices.yaml.example
+          severity: required
+          trigger: new device added to infrastructure
 
   # ── MCP Services ──────────────────────────────────────────
   - type: mcp
     name: astra-knowledge-base
     repo: alrcatraz/astra-knowledge-base-mcp
+    version: 1.0.0
     description: Knowledge base retrieval MCP service
     transport: stdio
     status: active
+    depends_on: []
+
+  # ── Infrastructure ────────────────────────────────────────
+  - type: infra
+    name: astra-camofox-browser
+    repo: alrcatraz/astra-camofox-browser
+    version: 1.0.0
+    description: >
+      Stealth browser automation server (Camofox fork) with Podman deployment.
+      Bypasses bot detection (Cloudflare, Xianyu, etc.) via Camoufox C++-level
+      fingerprint spoofing. Patched for Linux Xvfb + Playwright compatibility.
+    branch: astra
+    transport: http (port 9377)
+    status: active
+    depends_on: []
