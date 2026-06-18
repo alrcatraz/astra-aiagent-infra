@@ -5,6 +5,7 @@
 [![License](https://badgen.net/github/license/alrcatraz/astra-aiagent-infra)](LICENSE)
 [![GitHub stars](https://badgen.net/github/stars/alrcatraz/astra-aiagent-infra)](https://github.com/alrcatraz/astra-aiagent-infra)
 [![GitHub last commit](https://badgen.net/github/last-commit/alrcatraz/astra-aiagent-infra)](https://github.com/alrcatraz/astra-aiagent-infra/commits)
+[![Sponsor](https://img.shields.io/github/sponsors/alrcatraz?label=Sponsor&logo=github&color=ea4aaa&logoColor=white)](https://github.com/sponsors/alrcatraz)
 
 </div>
 
