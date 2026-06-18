@@ -1,5 +1,13 @@
 # Astra AI Agent Infrastructure (astra-aiagent-infra)
 
+<div align="center">
+
+[![License](https://badgen.net/github/license/alrcatraz/astra-aiagent-infra)](LICENSE)
+[![GitHub stars](https://badgen.net/github/stars/alrcatraz/astra-aiagent-infra)](https://github.com/alrcatraz/astra-aiagent-infra)
+[![GitHub last commit](https://badgen.net/github/last-commit/alrcatraz/astra-aiagent-infra)](https://github.com/alrcatraz/astra-aiagent-infra/commits)
+
+</div>
+
 > Hermes Agent ecosystem portal — Skills · SRE framework · MCP services · Tutorials
 > Companion for *Hermes Agent Advanced Tutorial* Vol. III
 
@@ -77,6 +85,14 @@ astra-aiagent-infra/
 ## License
 
 MIT © 2026 Nanaly
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=alrcatraz/astra-aiagent-infra,alrcatraz/astra-skill-execution-framework,alrcatraz/astra-skill-change-safeguard,alrcatraz/astra-skill-deploy-register,alrcatraz/astra-skill-pre-action-research,alrcatraz/astra-skill-work-closure-check,alrcatraz/astra-sre,alrcatraz/astra-camofox-browser,alrcatraz/hermes-agent-tutorial,alrcatraz/astra-knowledge-base-mcp&type=date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=alrcatraz/astra-aiagent-infra,alrcatraz/astra-skill-execution-framework,alrcatraz/astra-skill-change-safeguard,alrcatraz/astra-skill-deploy-register,alrcatraz/astra-skill-pre-action-research,alrcatraz/astra-skill-work-closure-check,alrcatraz/astra-sre,alrcatraz/astra-camofox-browser,alrcatraz/hermes-agent-tutorial,alrcatraz/astra-knowledge-base-mcp&type=date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=alrcatraz/astra-aiagent-infra,alrcatraz/astra-skill-execution-framework,alrcatraz/astra-skill-change-safeguard,alrcatraz/astra-skill-deploy-register,alrcatraz/astra-skill-pre-action-research,alrcatraz/astra-skill-work-closure-check,alrcatraz/astra-sre,alrcatraz/astra-camofox-browser,alrcatraz/hermes-agent-tutorial,alrcatraz/astra-knowledge-base-mcp&type=date" width="600" />
+  </picture>
+</div>
 
 ---
 
