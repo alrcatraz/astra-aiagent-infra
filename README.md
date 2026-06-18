@@ -85,7 +85,7 @@ astra-aiagent-infra/
 
 ## License
 
-MIT © 2026 Nanaly
+MIT © 2026 [alrcatraz](https://github.com/alrcatraz)
 
 <div align="center">
   <picture>
