@@ -92,6 +92,17 @@ components:
     description: Mandatory registration checklist after deploying a new service
     status: active
     depends_on: []
+    lifecycle:
+      deploy:
+        - id: kb-hermes-config
+          check: "部署新服务/新 MCP/新 CLI 工具后 → 写入 hermes_config KB（名称、路径、端口、用途、健康检查方式）"
+          severity: required
+          trigger: any new service, MCP server, or CLI tool deployed for Agent
+        - id: kb-service-inventory
+          check: Register new service in mgmt.services — both DB record AND healthcheck.py checks list
+          command: "INSERT INTO mgmt.services (name, type) VALUES (...); then add check to healthcheck.py checks[]"
+          severity: required
+          trigger: new Hermes-facing service deployed
 
   - type: skill
     name: work-closure-check
@@ -108,11 +119,35 @@ components:
         resource: docs/credential-schema.md
         required: optional
         reason: Credential leak scan references credential storage conventions
+    lifecycle:
+      closure:
+        - id: kb-dynamic-ref
+          check: "任务中发现了会变的参考数据（API 端点、端口、路径、限制等）？→ 写入 dynamic_ref KB"
+          severity: recommended
+          trigger: discovered any reference data that may change over time
+        - id: kb-hermes-config-update
+          check: "修改了服务配置/端口/路径？→ 同步更新 hermes_config KB"
+          severity: recommended
+          trigger: service config, port mapping, or path changed during task
+        - id: fact-store-preference
+          check: "用户表达了新的偏好或纠正了你的假设？→ 写入 Fact Store (user_pref)"
+          severity: required
+          trigger: user expressed a preference or corrected an assumption
+
+  - type: skill
+    name: astra-hub
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/devops/astra-hub/
+    version: 1.1.0
+    description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
+    status: active
+    depends_on: []
 
   # ── SRE Modules ───────────────────────────────────────────
   - type: sre
     name: astra-sre
     repo: alrcatraz/astra-sre
+    local_path: skills/devops/astra-sre/
     version: 1.0.0
     description: Unified SRE coordination layer — device inspection, fault diagnosis, auto-repair
     status: active
@@ -144,6 +179,78 @@ components:
           template: config/devices.yaml.example
           severity: required
           trigger: new device added to infrastructure
+
+  - type: sre
+    name: astra-sre-fix-e2ee
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/astra-sre-fix-e2ee/
+    version: 1.0.0
+    description: E2EE 故障诊断与修复 — Stale OTK、跨签名丢失、同步循环卡死、设备 ID 复用缓存冲突
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre when E2EE health check fails
+
+  - type: sre
+    name: astra-sre-fix-gfw
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/astra-sre-fix-gfw/
+    version: 1.0.0
+    description: GFW 阻断诊断与应对 — DNS 投毒检测、外部服务不可达时的降级策略、健康检查假阳性规避
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre when GFW-related outage detected
+
+  - type: sre
+    name: astra-sre-fix-mcp
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/astra-sre-fix-mcp/
+    version: 1.0.0
+    description: MCP 服务管理与清理 — 进程审计、内存泄漏检测、冗余 MCP 识别、MCP 进程计数监控
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre when MCP-related anomaly detected
+
+  - type: sre
+    name: astra-sre-fix-vps-recovery
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/astra-sre-fix-vps-recovery/
+    version: 1.0.0
+    description: VPS 升配/重建后恢复 — 磁盘操作、数据迁移、E2EE 信任链重建、恢复验证
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre after VPS resource migration
+
+  - type: sre
+    name: astra-sre-restart-service
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/astra-sre-restart-service/
+    version: 1.0.0
+    description: 通用服务重启诊断与修复 — 检测宕机服务、评估影响等级、执行重启、验证恢复
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre as generic service restart handler
+
+  - type: sre
+    name: server-bmc-diagnostics
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: skills/sre/server-bmc-diagnostics/
+    version: 1.0.0
+    description: Server BMC (Baseboard Management Controller) diagnostics — IPMI/SEL log analysis, hardware fault identification
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-sre
+        required: optional
+        reason: Invoked by astra-sre during hardware-level fault diagnosis
 
   # ── MCP Services ──────────────────────────────────────────
   - type: mcp
