@@ -12,7 +12,7 @@
 
 meta:
   project: astra-aiagent-infra
-  maintainer: Nanaly
+  maintainer: alrcatraz
   description: >
     Hermes Agent ecosystem portal — a unified index of all skills,
     SRE frameworks, MCP services, and tutorials.
@@ -84,6 +84,25 @@ components:
     description: Pre-change safeguarding checks & post-change side-effect scan
     status: active
     depends_on: []
+
+  - type: skill
+    name: astra-hub
+    repo: alrcatraz/astra-aiagent-infra
+    version: 1.1.0
+    description: >
+      Ecosystem map index — memory/knowledge routing, project index,
+      credential security guide, quick reference, and expert pitfalls.
+      Bundled within astra-aiagent-infra at skills/devops/astra-hub/.
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: skills/devops/astra-hub/SKILL.md
+        required: required
+        reason: SKILL.md is the primary skill document; this entry points to its location
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: skills/devops/astra-hub/references/
+        required: optional
+        reason: Reference documents (credential setup guide, public/private workspace split)
 
   - type: skill
     name: deploy-register
