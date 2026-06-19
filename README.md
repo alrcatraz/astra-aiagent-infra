@@ -114,7 +114,7 @@ A headless browser automation service (fork of Camoufox) with persistent profile
 
 ### 📘 Hermes Agent Tutorial
 
-A three-volume Chinese-language tutorial covering Hermes Agent from zero to advanced proficiency. Currently in planning.
+A three-volume Chinese-language tutorial covering Hermes Agent from zero to advanced proficiency.
 
 [![hermes-agent-tutorial](https://github-readme-stats.vercel.app/api/pin/?username=alrcatraz&repo=hermes-agent-tutorial)](https://github.com/alrcatraz/hermes-agent-tutorial)
 
