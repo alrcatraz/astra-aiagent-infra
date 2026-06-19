@@ -17,3 +17,4 @@ Thumbs.db
 # Hermes runtime (not part of the template)
 .hermes/
 .env
+mermaid-images/
