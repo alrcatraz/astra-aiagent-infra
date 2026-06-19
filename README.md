@@ -10,7 +10,7 @@
 </div>
 
 > Hermes Agent ecosystem portal — Skills · SRE framework · MCP services · Tutorials
-> Companion for *Hermes Agent Advanced Tutorial* Vol. III
+> Companion for *Hermes Agent Complete Tutorial* Vol. III
 
 ---
 
