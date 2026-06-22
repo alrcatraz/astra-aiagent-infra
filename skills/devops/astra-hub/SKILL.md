@@ -66,6 +66,7 @@ Add personal data to private copy:
 | **astra-camofox-browser** | ✅ fork | ~/Projects/astra/astra-camofox-browser/ | Browser automation (fork) | server.js |
 | **astra-aiagent-infra** | ✅ | ~/Projects/astra/astra-aiagent-infra/ | Portal meta-repo + lifecycle hooks | registry.yaml, lifecycle/astra-lifecycle-sync.py |
 | **astra-aiagent-infra-template** | ✅ | — | Template repository | — |
+| **astra-vcs-assist** | ✅ | ~/Projects/astra/astra-vcs-assist/ | VCS workflow orchestration (GPG key, Git init/dev/release/sync) | SKILL.md, routing.yaml, gpg/astra-vcs-assist-gpg-key/, git/skills/ |
 | **astra-skill-execution-framework** | ✅ | ~/Projects/astra/astra-skill-execution-framework/ | Task classification router | SKILL.md, scripts/sync-routing.py |
 | **astra-skill-change-safeguard** | ✅ | ~/Projects/astra/astra-skill-change-safeguard/ | Modification safety checklists | SKILL.md |
 | **astra-skill-deploy-register** | ✅ | ~/Projects/astra/astra-skill-deploy-register/ | Deployment registration checklists | SKILL.md |
