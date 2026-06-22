@@ -128,6 +128,68 @@ components:
         required: optional
         reason: Credential leak scan references credential storage conventions
 
+  # ── VCS Workflow ────────────────────────────────────────────
+  - type: skill
+    name: astra-vcs-assist
+    repo: alrcatraz/astra-vcs-assist
+    version: 1.0.0
+    description: >
+      Version control workflow orchestration — GPG key lifecycle, Git repo
+      bootstrap, daily dev flow, release management, and cross-machine sync.
+      Modular sub-skill tree (gpg-key, git-init, git-dev, git-release,
+      git-sync) that auto-loads into Hermes via symlinks.
+    status: active
+    depends_on: []
+    lifecycle:
+      closure:
+        - id: vcs-sub-skill-symlinks
+          check: Verify all sub-skill symlinks in Hermes discovery path are reachable
+          command: >
+            for d in astra-vcs-assist-gpg-key astra-vcs-assist-git-init
+            astra-vcs-assist-git-dev astra-vcs-assist-git-release
+            astra-vcs-assist-git-sync; do
+            test -L "$HOME/.hermes/skills/vcs/$d" -o -d "$HOME/.hermes/skills/vcs/$d"
+            || echo "MISSING: $d"; done
+          severity: required
+          trigger: sub-skill added, removed, or repo path changed
+        - id: vcs-routing-coverage
+          check: Verify routing.yaml covers every sub-skill directory
+          command: >
+            cd "$HOME/Projects/astra/astra-vcs-assist" &&
+            for d in git/skills/*/ gpg/*/; do
+            skill=$(basename "$d");
+            grep -q "$skill" routing.yaml || echo "UNCOVERED: $skill"; done
+          severity: recommended
+          trigger: routing.yaml or sub-skill SKILL.md modified
+      deploy:
+        - id: vcs-register-symlinks
+          check: Register all sub-skill symlinks in Hermes discovery path
+          command: >
+            mkdir -p "$HOME/.hermes/skills/vcs" &&
+            ln -sfn "$HOME/Projects/astra/astra-vcs-assist"
+            "$HOME/.hermes/skills/vcs/astra-vcs-assist" &&
+            for d in gpg/astra-vcs-assist-gpg-key
+            git/skills/astra-vcs-assist-git-init
+            git/skills/astra-vcs-assist-git-dev
+            git/skills/astra-vcs-assist-git-release
+            git/skills/astra-vcs-assist-git-sync; do
+            ln -sfn "$HOME/Projects/astra/astra-vcs-assist/$d"
+            "$HOME/.hermes/skills/vcs/$(basename $d)"; done
+          severity: required
+          trigger: new clone or first deploy of vcs-assist
+        - id: vcs-sub-skill-exist
+          check: Verify all sub-skill SKILL.md files exist
+          command: >
+            for f in SKILL.md
+            gpg/astra-vcs-assist-gpg-key/SKILL.md
+            git/skills/astra-vcs-assist-git-init/SKILL.md
+            git/skills/astra-vcs-assist-git-dev/SKILL.md
+            git/skills/astra-vcs-assist-git-release/SKILL.md
+            git/skills/astra-vcs-assist-git-sync/SKILL.md; do
+            test -f "$HOME/Projects/astra/astra-vcs-assist/$f" || echo "MISSING: $f"; done
+          severity: required
+          trigger: deploy or update of vcs-assist
+
   # ── SRE Modules ───────────────────────────────────────────
   - type: sre
     name: astra-sre
