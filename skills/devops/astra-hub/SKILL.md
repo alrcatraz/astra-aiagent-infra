@@ -1,8 +1,8 @@
 ---
 name: astra-hub
 description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
-version: 1.1.0
-author: ANGELIA
+version: 1.2.0
+author: alrcatraz
 platforms: [linux]
 ---
 
@@ -23,6 +23,75 @@ platforms: [linux]
 | 服务配置 | `kb_search("hermes_config", 关键词)` | — | 部署即登记 |
 | 服务状态 | `kb_search("service_mgmt", 关键词)` | — | cron 巡检更新 |
 | 项目索引 | **本技能**（见下节） | — | 新增 astra-* 项目时更新这里 |
+| 凭据查询 | **`credential-store-management` skill** | KeePassXC / GPG YAML / .env 三层 | 操作协议见该 skill |
+
+---
+
+## 🗂️ 信息存储层级
+
+> **通用决策树 — 新信息应该存哪里。**
+> 你的本地实例配置（KB 空间名、凭证路径等）→ `references/user-stores.md`。
+
+### Decision Tree
+
+```
+新信息
+  │
+  ├─ 流程 / 排查路径 / 修复步骤 / 配置方法
+  │   └─ SKILL（skill_manage action=create/patch）
+  │      Class-level 名称，session 细节走 references/
+  │
+  ├─ 可自动化同步的配置信息（MCP/服务/端口/约定）
+  │   └─ 知识库 KB（kb_add）
+  │
+  ├─ 用户偏好 / 沟通习惯 / 工具链选择
+  │   └─ Fact Store (category=user_pref)
+  │
+  ├─ 稳定环境事实（路径、IP、项目结构、版本号）
+  │   └─ MEMORY.md（陈述句，不用指令句）
+  │
+  └─ 临时状态 / PR 号 / commit SHA / 会话产物
+      └─ 不存任何地方 — 仅用 session_search 回溯
+```
+
+### Tier Explanations
+
+| 层级 | 存什么 | 不存什么 |
+|:-----|:-------|:---------|
+| **Skill** | 可复用的流程、排查路径、修复步骤、配置方法 | 单次会话产物、具体 IP/端口/路径 |
+| **知识库 KB** | 可被自动化同步覆盖的配置（服务、端口、限额） | 临时状态、故事性的根因分析 |
+| **Fact Store** | 偏好、沟通习惯、工具链选择 (`category=user_pref`) | 环境事实、步骤流程 |
+| **MEMORY.md** | 稳定环境事实 | 明文密码、偏好声明、任务进度 |
+| **session_search** | 所有临时/一次性信息 | 不应被当做持久记忆使用 |
+
+### 优先级规则
+
+发现值得记录的信息时，按此顺序判断：
+
+```
+有具体命令/步骤/判断条件/验证方法？
+  ├─ 是 → 已有相关 umbrella skill？ → patch 它
+  │             └─ 没有？ → 创建 class-level skill
+  └─ 否 → 是稳定事实/偏好/环境信息？
+       ├─ 偏好/习惯 → Fact Store (user_pref)
+       ├─ 环境事实 → MEMORY.md
+       └─ 配置数据 → 知识库 KB
+```
+
+### Audit Checklist
+
+不定期或在存了 5+ 条新事实后执行：
+
+1. **Fact Store** — 扫描重复条目（同一信息多次记录）
+2. **Fact Store** — 扫描 TODO/临时条目，应删未删
+3. **Fact Store** — 验证 `category` 字段：user_pref vs general
+4. **MEMORY.md** — 验证无明文密码残留
+5. **MEMORY.md** — 所有条目都是陈述句，非指令句
+6. **KB ↔ MEMORY 边界** — 任何描述可配置服务的 MEMORY 条目 → 应归 hermes_config KB
+7. **Skill ↔ MEMORY 边界** — 「怎么做」类信息不应在 MEMORY 里
+
+> 完整收尾检查清单（含凭证泄露扫描、技能更新检查、决策记录检查等）→ `work-closure-check` skill。
+> 你的本地存储具体配置 → `references/user-stores.md`。
 
 ---
 
@@ -76,11 +145,13 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | **astra-camofox-browser** | ✅ fork | ~/Projects/astra/astra-camofox-browser/ | ✅ ~/.astra/repos/astra-camofox-browser/ | 浏览器自动化 (fork) | server.js |
 | **astra-aiagent-infra** | ✅ | ~/Projects/astra/astra-aiagent-infra/ | ✅ ~/.astra/repos/astra-aiagent-infra/ | 门户 meta-repo + lifecycle-hooks | registry.yaml, lifecycle/astra-lifecycle-sync.py |
 | **astra-aiagent-infra-template** | ✅ | — | — | 模板库 | — |
-| **astra-skill-execution-framework** | ❌ | ~/Projects/astra/astra-skill-execution-framework/ | ✅ ~/.astra/repos/astra-skill-execution-framework/ | 任务分类路由框架 | SKILL.md, scripts/sync-routing.py |
+| **astra-vcs-assist** | ✅ | ~/Projects/astra/astra-vcs-assist/ | ✅ ~/.astra/repos/astra-vcs-assist/ | VCS 工作流编排（GPG 密钥、Git init、开发、发布、同步） | SKILL.md, routing.yaml, gpg/astra-vcs-assist-gpg-key/, git/skills/ |
+|| **astra-skill-execution-framework** | ✅ | ~/Projects/astra/astra-skill-execution-framework/ | ✅ ~/.astra/repos/astra-skill-execution-framework/ | 任务分类路由框架、自进化的路由引擎 | SKILL.md, routing.yaml, scripts/sync-routing.py |
 | **astra-skill-change-safeguard** | ❌ | ~/Projects/astra/astra-skill-change-safeguard/ | ✅ ~/.astra/repos/astra-skill-change-safeguard/ | 修改保全 checklists | SKILL.md |
 | **astra-skill-deploy-register** | ❌ | ~/Projects/astra/astra-skill-deploy-register/ | ✅ ~/.astra/repos/astra-skill-deploy-register/ | 部署登记 checklists | SKILL.md |
 | **astra-skill-pre-action-research** | ❌ | ~/Projects/astra/astra-skill-pre-action-research/ | ✅ ~/.astra/repos/astra-skill-pre-action-research/ | 执行前调研 | SKILL.md |
 | **astra-skill-work-closure-check** | ❌ | ~/Projects/astra/astra-skill-work-closure-check/ | ✅ ~/.astra/repos/astra-skill-work-closure-check/ | 收尾闭环检查 | SKILL.md |
+| **credential-store-management** | ❌（Layer 3） | 位于 astra-aiagent-infra 内 | ✅ `skills/devops/credential-store-management/` | 三层凭据管理协议 | SKILL.md, private/references/local-config.md |
 
 ### 已规划但未创建
 
@@ -100,10 +171,14 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 
 ## 🔐 凭证安全访问指南
 
-> 原则：不存实际凭证值在本技能。凭证分四组独立管理，每组对应的 GPG 加密文件位置不同，
-> 均使用 Alrcatraz 密钥（alrcatraz@gmx.com）加密，已导入本机。
-> 对外展示/工作/科研签名用 Zhen-Lin Huo 密钥（备份在 Utopia/GPG/GPG_Cert/），按需导入。
-> 日常网站/软件/OTP/Passkey → 你现有的 KeePassXC 数据库（Utopia/KeePassXC/），和你日常使用一致。
+> 完整三层操作协议（KeePassXC / GPG YAML / .env）见 `credential-store-management` skill。
+
+凭证管理分两个正交维度：
+
+| 维度 | 按什么分 | 在哪看 |
+|:----|:---------|:-------|
+| **按归属**（个人/工作/其他/临时） | 谁拥有这台设备 | 本节下方表格 |
+| **按存储工具**（KeePass / GPG / .env） | 什么类型的凭据 | `credential-store-management` |
 
 ### 凭证四组分类
 
@@ -115,40 +190,13 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | **⚪ 临时** | 不持久化 | 一次性访问、临时协作 | 借调机器、临时远程协助 |
 
 **使用方式：**
-- 个人/工作/其他 → `gpg --batch --decrypt <对应文件> 2>/dev/null | grep <key>`
+- 个人/工作/其他 → 按 `credential-store-management` 的三层协议执行
 - 临时 → 用户当场告知，用完即弃，不落地
-
-### 安全访问方式
-
-> 完整设置流程见 `references/gpg-credential-setup.md`（从 NAS 导入密钥 → 加密文件 → 验证解密）。
-
-| 凭证 | 存放位置 | 获取方式 | 备注 |
-|:----|:--------|:---------|:-----|
-| Hermes API tokens | ~/.hermes/.env | Hermes 原生读取，不走终端 | ✅ 安全 |
-| SSH 私钥 | ~/.ssh/id_ed25519* | SSH 自动使用 | ✅ 已部署至所有自有设备 |
-| 个人设备密码 | GPG 加密文件 `personal-*.gpg` | `gpg --batch --decrypt 文件 \\| grep <key>` | 分组见上方凭证四组分类 |
-| 工作设备密码 | GPG 加密文件 `work-*.gpg` | `gpg --batch --decrypt 文件 \\| grep <key>` | 分组见上方凭证四组分类 |
-| 其他设备密码 | GPG 加密文件 `other-*.gpg` | `gpg --batch --decrypt 文件 \\| grep <key>` | 分组见上方凭证四组分类 |
-| Matrix 恢复密钥 | ~/.hermes/.env（HERMES_GW_RECOVERY_KEY） | Hermes 原生读取 | ✅ |
-| Synapse admin token | VPS-HK /root/.nanaly_admin_token | SSH 后 cat，不走本地终端 | ⚠️ 红化损坏历史，用 base64 编码绕过 |
-
-### 已知红化风险操作
-
-- `sudo -S` piping → ❌ 被阻止，用 Hermes 内部 SUDO_PASSWORD
-- `echo | sshpass -p 'xxx'` → ⚠️ 高危，优先用 SSH key
-- 终端 args 里直接写密码 → ⚠️ 触发红化可能损坏文件
-- GPG 解密走 stdin → ✅ 安全（密码不出现于 args 或输出中）
 
 ### 记忆里的凭证
 
-**原则变更（2026-06-09）：** 记忆（memory tool）里不允许存任何实际凭证值。
-- 设备密码 → `pw→GPG creds` 引用
-- SSH 密钥路径 → 可以存（不是凭证值）
-- 用户名/域名/端口 → 可以存
-- 密码/token/私钥内容 → ❌ **禁止**
-- sudo 密码指向 → `sudo→GPG creds` 引用
-
-发现记忆里有明文凭证 → 立即清理并用 `→GPG creds` 替换。
+完整规则见 `credential-store-management` → Credential Safety in Persistent Memory 章节。
+核心原则：**memory / fact_store 中不允许存任何实际凭证值**，仅保留 `→GPG creds` 引用。
 
 ### 收尾闭环检查
 
@@ -178,7 +226,6 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | 服务 | 类型 | 端口 | 启动方式 | 说明 |
 |:----|:----|:----:|:---------|:------|
 | **mihomo** | systemd | 7890/9090 | `sudo systemctl enable --now mihomo` | 代理引擎（headless），FlClash 替代品 |
-| **Path Optimizer** | cron（规划中） | — | 脚本自动更新 /etc/hosts | 四路优选（EasyTier/Tailscale/ZT/公网） |
 
 ### 补丁管理
 
@@ -203,10 +250,10 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 
 | 别名 | 目标 | 身份文件 |
 |:----|:----|:--------|
-| `ssh vps-hk` | root@10.20.4.10:2222 | ~/.ssh/id_ed25519 |
-| `ssh vps-uk` | root@10.10.4.11 | ~/.ssh/id_ed25519 |
-| `ssh ds425plus` | Alrcatraz@10.20.3.10 | ~/.ssh/id_ed25519 |
-| `ssh suset01` | alrcatraz@10.20.2.14 | ~/.ssh/id_ed25519_jump_star |
+| `ssh vps-hk` | root@10.20.10.1:2222 | ~/.ssh/id_ed25519 |
+| `ssh vps-uk` | root@10.10.10.2 | ~/.ssh/id_ed25519 |
+| `ssh ds425plus` | Alrcatraz@10.20.20.1 | ~/.ssh/id_ed25519 |
+| `ssh suset01` | alrcatraz@10.20.60.2 | ~/.ssh/id_ed25519_jump_star |
 | `ssh susetlearn00` | alrcatraz@192.168.0.20 | ~/.ssh/id_ed25519 |
 
 ### 知识库空间一览
