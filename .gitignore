@@ -17,3 +17,7 @@ Thumbs.db
 # Hermes runtime (not part of the template)
 .hermes/
 .env
+mermaid-images/
+
+# Auto-generated - project structure tracking
+.codegraph/

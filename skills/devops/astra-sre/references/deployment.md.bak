@@ -96,10 +96,10 @@ Home Room — 📊 服务健康/设备监控
 
 | Device | SSH Alias | Key | Status |
 |:-------|:----------|:----|:-------|
-| vps-hk | `root@10.20.10.1:2222` | `id_ed25519` | ✅ |
-| vps-uk | `root@10.10.10.2` | `id_ed25519` | ✅ |
-| ds425plus | `Alrcatraz@10.20.20.1` | `id_ed25519` | ✅ |
-| suset01 | `alrcatraz@10.20.60.2` | `id_ed25519` | ✅ (mobile, may be offline) |
+| vps-hk | `root@10.20.4.10:2222` | `id_ed25519` | ✅ |
+| vps-uk | `root@10.10.4.11` | `id_ed25519` | ✅ |
+| ds425plus | `Alrcatraz@10.20.3.10` | `id_ed25519` | ✅ |
+| suset01 | `alrcatraz@10.20.2.14` | `id_ed25519` | ✅ (mobile, may be offline) |
 | homecentre01 | `localhost` | `id_ed25519` | ✅ (this machine) |
 | susetlearn00 | `alrcatraz@192.168.0.20` | `id_ed25519` | ✅ (LAN, often offline in this room) |
 | openwrt | `root@192.168.0.1:22` | `id_ed25519` | ⚠️ (no key, password access) |
