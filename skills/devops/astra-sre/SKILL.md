@@ -2,7 +2,7 @@
 name: astra-sre
 description: "Unified SRE coordinating layer for multi-node infrastructure — orchestrates health scanning, incident triage, guided repair, and a learning loop across all managed devices. Delegates domain-specific fix logic to sub-skills; never duplicates their work."
 version: 1.0.0
-author: ANGELIA
+author: alrcatraz
 platforms: [linux]
 related_skills:
   - astra-hub
