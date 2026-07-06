@@ -144,7 +144,7 @@ MIT © 2026 [alrcatraz](https://github.com/alrcatraz)
 
 <div align="center">
 
-<img src="https://api.star-history.com/chart?repos=alrcatraz/astra-aiagent-infra,alrcatraz/astra-skill-execution-framework,alrcatraz/astra-skill-change-safeguard,alrcatraz/astra-skill-deploy-register,alrcatraz/astra-skill-pre-action-research,alrcatraz/astra-skill-work-closure-check,alrcatraz/astra-sre,alrcatraz/astra-camofox-browser,alrcatraz/hermes-agent-tutorial,alrcatraz/astra-knowledge-base-mcp&type=date" width="600" alt="Star History Chart" />
+<img src="https://api.star-history.com/chart?repos=alrcatraz/astra-aiagent-infra,alrcatraz/astra-skill-execution-framework,alrcatraz/astra-skill-change-safeguard,alrcatraz/astra-sre,alrcatraz/astra-camofox-browser,alrcatraz/hermes-agent-tutorial,alrcatraz/astra-knowledge-base-mcp&type=date" width="600" alt="Star History Chart" />
 
 </div>
 

@@ -147,11 +147,13 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | **astra-aiagent-infra-template** | ✅ | — | — | 模板库 | — |
 | **astra-vcs-assist** | ✅ | ~/Projects/astra/astra-vcs-assist/ | ✅ ~/.astra/repos/astra-vcs-assist/ | VCS 工作流编排（GPG 密钥、Git init、开发、发布、同步） | SKILL.md, routing.yaml, gpg/astra-vcs-assist-gpg-key/, git/skills/ |
 || **astra-skill-execution-framework** | ✅ | ~/Projects/astra/astra-skill-execution-framework/ | ✅ ~/.astra/repos/astra-skill-execution-framework/ | 任务分类路由框架、自进化的路由引擎 | SKILL.md, routing.yaml, scripts/sync-routing.py |
-| **astra-skill-change-safeguard** | ❌ | ~/Projects/astra/astra-skill-change-safeguard/ | ✅ ~/.astra/repos/astra-skill-change-safeguard/ | 修改保全 checklists | SKILL.md |
-| **astra-skill-deploy-register** | ❌ | ~/Projects/astra/astra-skill-deploy-register/ | ✅ ~/.astra/repos/astra-skill-deploy-register/ | 部署登记 checklists | SKILL.md |
-| **astra-skill-pre-action-research** | ❌ | ~/Projects/astra/astra-skill-pre-action-research/ | ✅ ~/.astra/repos/astra-skill-pre-action-research/ | 执行前调研 | SKILL.md |
-| **astra-skill-work-closure-check** | ❌ | ~/Projects/astra/astra-skill-work-closure-check/ | ✅ ~/.astra/repos/astra-skill-work-closure-check/ | 收尾闭环检查 | SKILL.md |
+|| **astra-skill-change-safeguard** | ❌ | ~/Projects/astra/astra-skill-change-safeguard/ | ✅ ~/.astra/repos/astra-skill-change-safeguard/ | 修改保全 checklists | SKILL.md |
+|| **astra-skill-deploy-register** | ❌ | ~/Projects/astra/astra-skill-deploy-register/ | ✅ ~/.astra/repos/astra-skill-deploy-register/ | 部署登记 checklists | SKILL.md |
+|| **astra-skill-pre-action-research** | ❌ | ~/Projects/astra/astra-skill-pre-action-research/ | ✅ ~/.astra/repos/astra-skill-pre-action-research/ | 执行前调研 | SKILL.md |
+|| **astra-skill-work-closure-check** | ❌ | ~/Projects/astra/astra-skill-work-closure-check/ | ✅ ~/.astra/repos/astra-skill-work-closure-check/ | 收尾闭环检查 | SKILL.md |
 | **credential-store-management** | ❌（Layer 3） | 位于 astra-aiagent-infra 内 | ✅ `skills/devops/credential-store-management/` | 三层凭据管理协议 | SKILL.md, private/references/local-config.md |
+| **context-anchor** | ❌（work-principles 内） | 位于 astra-aiagent-infra `work-principles/plugin/context-anchor/` | ✅ 同上（私有副本） | Hermes Plugin: 跨会话上下文锚定 + 状态持久化 | __init__.py, hooks.py, state.py |
+| **astra-web-extract-markitdown** | ✅ | ~/Projects/astra/astra-web-extract-markitdown/ | ✅ ~/.astra/repos/astra-web-extract-markitdown/ | Hermes Plugin: web_extract 替代（markitdown-mcp 后端） | plugin/__init__.py, plugin/tools.py |
 
 ### 已规划但未创建
 

@@ -26,13 +26,14 @@ import yaml
 SCRIPT_DIR = Path(__file__).resolve().parent
 META_DIR = SCRIPT_DIR.parent                 # astra-aiagent-infra/
 PROJECTS_DIR = META_DIR.parent               # ~/Projects/astra/
+PRIVATE_DIR = Path.home() / ".astra" / "repos" / "astra-aiagent-infra"
 
-REGISTRY_PATH = META_DIR / "registry.yaml"
-
-# Map lifecycle type → target skill repo name
+REGISTRY_PATH = META_DIR / "registry.yaml"   # authoritative source (dev)
+HOOKS_DIR = PRIVATE_DIR                      # hook injection target (private)
+# Map lifecycle type → target skill path (relative to HOOKS_DIR)
 TARGET_SKILLS = {
-    "closure":  "astra-skill-work-closure-check",
-    "deploy":   "astra-skill-deploy-register",
+    "closure":  "work-principles/skills/work-closure-check",
+    "deploy":   "work-principles/skills/deploy-register",
 }
 
 MARKER_BEGIN = "<!-- LIFECYCLE_HOOKS_BEGIN -->"
@@ -54,8 +55,8 @@ def load_registry(path: Path) -> dict:
 
 def resolve_skill_path(lifecycle_type: str) -> Path:
     """Resolve the target SKILL.md for a given lifecycle type."""
-    repo_name = TARGET_SKILLS[lifecycle_type]
-    return PROJECTS_DIR / repo_name / "SKILL.md"
+    skill_path = TARGET_SKILLS[lifecycle_type]
+    return HOOKS_DIR / skill_path / "SKILL.md"
 
 
 def type_label(t: str) -> str:
