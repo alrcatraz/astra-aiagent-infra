@@ -34,18 +34,22 @@ components:
         resource: registry.yaml
         required: optional
         reason: Scanned by sync-routing.py to detect new skills for routing
-      - repo: alrcatraz/astra-skill-pre-action-research
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: work-principles/skills/pre-action-research
         required: optional
-        reason: Routed to when task type is research & plan
-      - repo: alrcatraz/astra-skill-change-safeguard
+        reason: Absorbed into work-principles — research & plan routing
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: work-principles/skills/change-safeguard
         required: optional
-        reason: Routed to when task type is system modification
-      - repo: alrcatraz/astra-skill-deploy-register
+        reason: Routed to when task type is system modification (absorbed from astra-skill-change-safeguard)
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: work-principles/skills/deploy-register
         required: optional
-        reason: Routed to when task type is service deployment
-      - repo: alrcatraz/astra-skill-work-closure-check
+        reason: Absorbed into work-principles — deploy routing
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: work-principles/skills/work-closure-check
         required: optional
-        reason: Routed to when task type is wrap-up & closure
+        reason: Absorbed into work-principles — closure routing
     lifecycle:
       closure:
         - id: ef-version-consistency
@@ -66,15 +70,17 @@ components:
       Exhaustive search protocol and credential lifecycle workflows.
     status: active
     depends_on:
-      - repo: alrcatraz/astra-skill-pre-action-research
+      - repo: alrcatraz/astra-aiagent-infra
+        resource: work-principles/skills/pre-action-research
         required: optional
-        reason: Cross-referenced for credential lookup during research phase
+        reason: Absorbed into work-principles — credential lookup during research
 
   # ── Tutorials ─────────────────────────────────────────────
   - type: tutorial
     name: hermes-agent-tutorial
     repo: alrcatraz/hermes-agent-tutorial
     version: 1.0.0
+    version: 3.0.0
     description: Hermes Agent from scratch (3 volumes)
     lang: [zh-CN, en]
     status: active
@@ -82,92 +88,40 @@ components:
 
   # ── Skills ────────────────────────────────────────────────
   - type: skill
-    name: pre-action-research
-    repo: alrcatraz/astra-skill-pre-action-research
-    version: 1.0.0
-    description: Mandatory research & index lookup before taking action
-    status: active
-    depends_on:
-      - repo: alrcatraz/astra-aiagent-infra
-        resource: docs/credential-schema.md
-        required: optional
-        reason: Credential storage conventions for the credential-check step
-
-  - type: skill
     name: change-safeguard
-    repo: alrcatraz/astra-skill-change-safeguard
-    version: 1.0.0
-    description: Pre-change safeguarding checks & post-change side-effect scan
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: work-principles/skills/change-safeguard/
+    version: 2.0.0
+    description: Pre-change safeguarding checks & post-change side-effect scan (migrated into work-principles)
     status: active
     depends_on: []
 
   - type: skill
-    name: astra-hub
+    name: work-principles
     repo: alrcatraz/astra-aiagent-infra
-    version: 1.2.0
+    local_path: work-principles/
+    version: 1.0.0
     description: >
-      Ecosystem map index — memory/knowledge routing, project index,
-      credential security guide, quick reference, and expert pitfalls.
-      Bundled within astra-aiagent-infra at skills/devops/astra-hub/.
+      Umbrella for work discipline — context anchoring, approval discipline,
+      pre-action research, closure check, deploy registration. Replaces
+      pre-action-research, work-closure-check, deploy-register as standalone skills.
     status: active
     depends_on:
       - repo: alrcatraz/astra-aiagent-infra
-        resource: skills/devops/astra-hub/SKILL.md
-        required: required
-        reason: SKILL.md is the primary skill document; this entry points to its location
-      - repo: alrcatraz/astra-aiagent-infra
-        resource: skills/devops/astra-hub/references/
+        resource: registry.yaml
         required: optional
-        reason: Reference documents (credential setup guide, public/private workspace split)
-
-  - type: skill
-    name: deploy-register
-    repo: alrcatraz/astra-skill-deploy-register
-    version: 1.0.0
-    description: Mandatory registration checklist after deploying a new service
-    status: active
-    depends_on: []
+        reason: Self-discovered via registry
     lifecycle:
       deploy:
-        - id: kb-hermes-config
-          check: "部署新服务/新 MCP/新 CLI 工具后 → 写入 hermes_config KB（名称、路径、端口、用途、健康检查方式）"
+        - id: wp-service-register
+          check: 部署新服务后注册到服务清单 + 健康检查 → 详见 work-principles/skills/deploy-register
           severity: required
-          trigger: any new service, MCP server, or CLI tool deployed for Agent
-        - id: kb-service-inventory
-          check: Register new service in mgmt.services — both DB record AND healthcheck.py checks list
-          command: "INSERT INTO mgmt.services (name, type) VALUES (...); then add check to healthcheck.py checks[]"
-          severity: required
-          trigger: new Hermes-facing service deployed
-
-  - type: skill
-    name: work-closure-check
-    repo: alrcatraz/astra-skill-work-closure-check
-    version: 1.1.0
-    description: Mandatory closure checklist when wrapping up a task
-    status: active
-    depends_on:
-      - repo: alrcatraz/astra-sre
-        resource: Two-Strike Rule (skill creation decision tree)
-        required: optional
-        reason: Decisions about skill creation vs patching during closure
-      - repo: alrcatraz/astra-aiagent-infra
-        resource: docs/credential-schema.md
-        required: optional
-        reason: Credential leak scan references credential storage conventions
-    lifecycle:
+          trigger: new service, MCP, or CLI tool deployed
       closure:
-        - id: kb-dynamic-ref
-          check: "任务中发现了会变的参考数据（API 端点、端口、路径、限制等）？→ 写入 dynamic_ref KB"
-          severity: recommended
-          trigger: discovered any reference data that may change over time
-        - id: kb-hermes-config-update
-          check: "修改了服务配置/端口/路径？→ 同步更新 hermes_config KB"
-          severity: recommended
-          trigger: service config, port mapping, or path changed during task
-        - id: fact-store-preference
-          check: "用户表达了新的偏好或纠正了你的假设？→ 写入 Fact Store (user_pref)"
+        - id: wp-closure
+          check: 收尾 checklist（凭据扫描 + skill 更新 + 决策记录 + 信息存储）→ 详见 work-principles/skills/work-closure-check
           severity: required
-          trigger: user expressed a preference or corrected an assumption
+          trigger: task wrap-up
 
   - type: skill
     name: astra-hub
@@ -177,6 +131,13 @@ components:
     description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
     status: active
     depends_on: []
+    lifecycle:
+      deploy:
+        - id: hub-index-sync
+          check: 验证 Hub 项目索引表包含所有 registry 中已注册的组件（不含已吸收的独立条目）
+          command: "grep -c '|' ~/Projects/astra/astra-aiagent-infra/skills/devops/astra-hub/SKILL.md | head -1 || echo 'Manual check: compare Hub index vs registry.yaml components'"
+          severity: required
+          trigger: registry.yaml modified（新增/移除组件）
 
   # ── VCS Workflow ──────────────────────────────────────────
   - type: skill
@@ -245,7 +206,7 @@ components:
     name: astra-sre
     repo: alrcatraz/astra-sre
     local_path: skills/devops/astra-sre/
-    version: 1.0.0
+    version: 1.0.1
     description: Unified SRE coordination layer — device inspection, fault diagnosis, auto-repair
     status: active
     depends_on:
@@ -281,13 +242,49 @@ components:
   - type: mcp
     name: astra-knowledge-base
     repo: alrcatraz/astra-knowledge-base-mcp
-    version: 1.0.0
+    version: 1.1.0
     description: Knowledge base retrieval MCP service
     transport: stdio
     status: active
     depends_on: []
 
-  # ── Infrastructure ────────────────────────────────────────
+  
+  
+  # ── Plugins ────────────────────────────────────────────────
+  - type: plugin
+    name: context-anchor
+    repo: alrcatraz/astra-aiagent-infra
+    local_path: work-principles/plugin/context-anchor/
+    version: 1.0.0
+    description: >-
+      Hermes Plugin: cross-session context anchoring. Automatically maintains
+      [AGENT CONTEXT] headers via pre_llm_call + post_tool_call hooks.
+      State persistence, SSH auto-detection, thread session tracking.
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-knowledge-base-mcp
+        resource: markitdown-mcp MCP server
+        required: optional
+        reason: Shares the same MCP infrastructure
+
+# ── Plugins ────────────────────────────────────────────────
+  - type: plugin
+    name: web-extract-markitdown
+    repo: alrcatraz/astra-web-extract-markitdown
+    version: 1.0.0
+    description: >-
+      Replace web_extract with a local markitdown-mcp backend. Converts URLs to
+      markdown via ctx.dispatch_tool → mcp_markitdown_convert_to_markdown.
+      Inherits GLM vision model for OCR on images and scanned PDFs.
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-knowledge-base-mcp
+        resource: markitdown-mcp MCP server
+        required: required
+        reason: Plugin dispatches to mcp_markitdown_convert_to_markdown
+
+
+# ── Infrastructure ────────────────────────────────────────
   - type: infra
     name: astra-camofox-browser
     repo: alrcatraz/astra-camofox-browser

@@ -1,0 +1,15 @@
+name: work-principles
+version: 1.0.0
+description: >-
+  Work discipline enforcement — phase tracking, context injection,
+  and bundled skills.  Part of the work-principles skill.
+  Agent calls discipline_set_phase() to declare phases;
+  pre_tool_call blocks out-of-phase tool usage.
+author: alrcatraz
+provides_tools:
+  - discipline_set_phase
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - on_session_start
