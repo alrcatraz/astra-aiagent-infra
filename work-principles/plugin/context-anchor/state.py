@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 PERSISTENT_DIR = Path(os.environ.get("HOME", "~/.hermes")) / ".hermes" / "persistent"
-STATE_FILE = PERSISTENT_DIR / "state.json"
+STATE_FILE = PERSISTENT_DIR / "context-anchor.json"
 
 
 def _ensure_persistent_dir() -> Path:
