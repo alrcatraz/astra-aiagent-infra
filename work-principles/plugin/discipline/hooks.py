@@ -41,6 +41,33 @@ from .state import (
 
 logger = logging.getLogger("work-principles")
 
+# ── Gate audit logging ──────────────────────────────────────────────────
+import json as _json_audit
+from datetime import datetime as _dt_audit
+
+_GATE_AUDIT_LOG = Path.home() / ".hermes" / "persistent" / "gate-audit.log"
+
+
+def _log_gate_block(gate: str, tool_name: str, phase: str,
+                    command: str = "",
+                    reason: str = "") -> None:
+    """Append a structured JSON line to the gate audit log."""
+    try:
+        _GATE_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "t": _dt_audit.now().isoformat(),
+            "gate": gate,
+            "tool": tool_name,
+            "phase": phase,
+            "cmd": command[:120],
+            "reason": reason[:200],
+        }
+        with open(_GATE_AUDIT_LOG, "a") as f:
+            f.write(_json_audit.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # audit logging is best-effort
+
+
 # ── Read-only command whitelist ─────────────────────────────────────────
 # Commands that are ALWAYS safe to run during research phase, regardless of
 # arguments.  Each entry is checked as a prefix (command starts with it).
@@ -346,6 +373,10 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             command = (args or {}).get("command", "")
             if _is_read_only_command(command):
                 return None
+            _log_gate_block("research", tool_name,
+                            current_phase.value,
+                            command=command,
+                            reason="non-readonly terminal during research")
             return {
                 "action": "block",
                 "message": (
@@ -356,6 +387,9 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             }
 
         # All other tools blocked during research unless in whitelist
+        _log_gate_block("research", tool_name,
+                        current_phase.value,
+                        reason="non-research tool during research")
         return {
             "action": "block",
             "message": (
@@ -368,6 +402,9 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
 
     # ── Block modifying tools in disallowed phases ──
     if tool_name in _MODIFYING_TOOLS and current_phase not in _MODIFY_ALLOWED:
+        _log_gate_block("modify", tool_name,
+                        current_phase.value,
+                        reason=f"write tool in {current_phase.value}")
         return {
             "action": "block",
             "message": (
@@ -382,6 +419,9 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
         command = (args or {}).get("command", "")
         if current_phase not in _SSH_ALLOWED and _SSH_RE.search(command):
             cmd_preview = command[:80].replace("\n", "\\n")
+            _log_gate_block("ssh", tool_name, current_phase.value,
+                            command=command,
+                            reason=f"remote access in {current_phase.value}")
             return {
                 "action": "block",
                 "message": (
@@ -402,6 +442,9 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             command = (args or {}).get("command", "")
             if _is_read_only_command(command):
                 return None
+            _log_gate_block("closure", tool_name, current_phase.value,
+                            command=command,
+                            reason="non-readonly terminal during closing")
             return {
                 "action": "block",
                 "message": (
@@ -414,6 +457,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
         if tool_name in _CLOSING_TOOLS:
             return None
         # Everything else blocked
+        _log_gate_block("closure", tool_name, current_phase.value,
+                        reason=f"{tool_name} blocked during closing")
         return {
             "action": "block",
             "message": (
