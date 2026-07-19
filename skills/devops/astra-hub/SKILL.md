@@ -4,6 +4,13 @@ description: "astar-* 生态地图索引：记忆/知识路由、项目索引、
 version: 1.2.0
 author: alrcatraz
 platforms: [linux]
+metadata:
+  hermes:
+    tags: [astra, ecosystem, knowledge-routing, project-index, memory]
+triggers:
+  - astra-hub
+  - astar
+  - astra hub
 ---
 
 # astra-hub — 生态地图索引
@@ -30,7 +37,7 @@ platforms: [linux]
 ## 🗂️ 信息存储层级
 
 > **通用决策树 — 新信息应该存哪里。**
-> 你的本地实例配置（KB 空间名、凭证路径等）→ `references/user-stores.md`。
+> 你的本地实例配置（KB 空间名、凭证路径等）→ 对应技能的私有副本 `references/` 目录。
 
 ### Decision Tree
 
@@ -66,8 +73,6 @@ platforms: [linux]
 
 ### 优先级规则
 
-发现值得记录的信息时，按此顺序判断：
-
 ```
 有具体命令/步骤/判断条件/验证方法？
   ├─ 是 → 已有相关 umbrella skill？ → patch 它
@@ -78,20 +83,7 @@ platforms: [linux]
        └─ 配置数据 → 知识库 KB
 ```
 
-### Audit Checklist
-
-不定期或在存了 5+ 条新事实后执行：
-
-1. **Fact Store** — 扫描重复条目（同一信息多次记录）
-2. **Fact Store** — 扫描 TODO/临时条目，应删未删
-3. **Fact Store** — 验证 `category` 字段：user_pref vs general
-4. **MEMORY.md** — 验证无明文密码残留
-5. **MEMORY.md** — 所有条目都是陈述句，非指令句
-6. **KB ↔ MEMORY 边界** — 任何描述可配置服务的 MEMORY 条目 → 应归 hermes_config KB
-7. **Skill ↔ MEMORY 边界** — 「怎么做」类信息不应在 MEMORY 里
-
-> 完整收尾检查清单（含凭证泄露扫描、技能更新检查、决策记录检查等）→ `work-closure-check` skill。
-> 你的本地存储具体配置 → `references/user-stores.md`。
+> 完整收尾检查清单（含凭证泄露扫描、技能更新检查等）→ `work-closure-check` skill。
 
 ---
 
@@ -146,11 +138,7 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | **astra-aiagent-infra** | ✅ | ~/Projects/astra/astra-aiagent-infra/ | ✅ ~/.astra/repos/astra-aiagent-infra/ | 门户 meta-repo + lifecycle-hooks | registry.yaml, lifecycle/astra-lifecycle-sync.py |
 | **astra-aiagent-infra-template** | ✅ | — | — | 模板库 | — |
 | **astra-vcs-assist** | ✅ | ~/Projects/astra/astra-vcs-assist/ | ✅ ~/.astra/repos/astra-vcs-assist/ | VCS 工作流编排（GPG 密钥、Git init、开发、发布、同步） | SKILL.md, routing.yaml, gpg/astra-vcs-assist-gpg-key/, git/skills/ |
-|| **astra-skill-execution-framework** | ✅ | ~/Projects/astra/astra-skill-execution-framework/ | ✅ ~/.astra/repos/astra-skill-execution-framework/ | 任务分类路由框架、自进化的路由引擎 | SKILL.md, routing.yaml, scripts/sync-routing.py |
-|| **astra-skill-change-safeguard** | ❌ | ~/Projects/astra/astra-skill-change-safeguard/ | ✅ ~/.astra/repos/astra-skill-change-safeguard/ | 修改保全 checklists | SKILL.md |
-|| **astra-skill-deploy-register** | ❌ | ~/Projects/astra/astra-skill-deploy-register/ | ✅ ~/.astra/repos/astra-skill-deploy-register/ | 部署登记 checklists | SKILL.md |
-|| **astra-skill-pre-action-research** | ❌ | ~/Projects/astra/astra-skill-pre-action-research/ | ✅ ~/.astra/repos/astra-skill-pre-action-research/ | 执行前调研 | SKILL.md |
-|| **astra-skill-work-closure-check** | ❌ | ~/Projects/astra/astra-skill-work-closure-check/ | ✅ ~/.astra/repos/astra-skill-work-closure-check/ | 收尾闭环检查 | SKILL.md |
+|| **astra-skill-execution-framework** | ✅ | ~/Projects/astra/astra-skill-execution-framework/ | ✅ ~/.astra/repos/astra-skill-execution-framework/ | 任务分类路由框架、自进化路由引擎 | SKILL.md, routing.yaml, scripts/sync-routing.py |
 | **credential-store-management** | ❌（Layer 3） | 位于 astra-aiagent-infra 内 | ✅ `skills/devops/credential-store-management/` | 三层凭据管理协议 | SKILL.md, private/references/local-config.md |
 | **context-anchor** | ❌（work-principles 内） | 位于 astra-aiagent-infra `work-principles/plugin/context-anchor/` | ✅ 同上（私有副本） | Hermes Plugin: 跨会话上下文锚定 + 状态持久化 | __init__.py, hooks.py, state.py |
 | **astra-web-extract-markitdown** | ✅ | ~/Projects/astra/astra-web-extract-markitdown/ | ✅ ~/.astra/repos/astra-web-extract-markitdown/ | Hermes Plugin: web_extract 替代（markitdown-mcp 后端） | plugin/__init__.py, plugin/tools.py |
@@ -228,6 +216,7 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 | 服务 | 类型 | 端口 | 启动方式 | 说明 |
 |:----|:----|:----:|:---------|:------|
 | **mihomo** | systemd | 7890/9090 | `sudo systemctl enable --now mihomo` | 代理引擎（headless），FlClash 替代品 |
+| **Path Optimizer** | cron（规划中） | — | 脚本自动更新 /etc/hosts | 四路优选（EasyTier/Tailscale/ZT/公网） |
 
 ### 补丁管理
 
@@ -252,10 +241,10 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 
 | 别名 | 目标 | 身份文件 |
 |:----|:----|:--------|
-| `ssh vps-hk` | root@10.20.10.1:2222 | ~/.ssh/id_ed25519 |
-| `ssh vps-uk` | root@10.10.10.2 | ~/.ssh/id_ed25519 |
-| `ssh ds425plus` | Alrcatraz@10.20.20.1 | ~/.ssh/id_ed25519 |
-| `ssh suset01` | alrcatraz@10.20.60.2 | ~/.ssh/id_ed25519_jump_star |
+| `ssh vps-hk` | root@10.20.4.10:2222 | ~/.ssh/id_ed25519 |
+| `ssh vps-uk` | root@10.10.4.11 | ~/.ssh/id_ed25519 |
+| `ssh ds425plus` | Alrcatraz@10.20.3.10 | ~/.ssh/id_ed25519 |
+| `ssh suset01` | alrcatraz@10.20.2.14 | ~/.ssh/id_ed25519_jump_star |
 | `ssh susetlearn00` | alrcatraz@192.168.0.20 | ~/.ssh/id_ed25519 |
 
 ### 知识库空间一览
