@@ -79,7 +79,6 @@ components:
   - type: tutorial
     name: hermes-agent-tutorial
     repo: alrcatraz/hermes-agent-tutorial
-    version: 1.0.0
     version: 3.0.0
     description: Hermes Agent from scratch (3 volumes)
     lang: [zh-CN, en]
