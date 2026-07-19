@@ -4,9 +4,13 @@ description: "Unified SRE coordinating layer for multi-node infrastructure — o
 version: 1.0.0
 author: alrcatraz
 platforms: [linux]
+metadata:
+  hermes:
+    tags: [sre, site-reliability, infrastructure, monitoring, incident-response, orchestration]
 related_skills:
   - astra-hub
   - astra-sre-fix-e2ee
+  - astra-sre-proxy-daemon
   - astra-sre-restart-service
   - astra-sre-fix-gfw
   - astra-sre-fix-mcp
@@ -18,6 +22,17 @@ related_skills:
   - crash-marker-pattern
   - full-e2ee-recovery-after-server-rebuild
   - pre-upgrade-server-backup
+triggers:
+  - astra-sre
+  - unified
+  - coordinating
+  - layer
+  - multi
+  - node
+  - infrastructure
+  - orchestrates
+  - health
+  - scanning
 ---
 
 # astra-sre — Unified Infrastructure Reliability
