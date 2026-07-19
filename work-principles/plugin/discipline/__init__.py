@@ -4,7 +4,7 @@ Registers:
   - ``discipline_set_phase`` tool — agent declares phase transitions
   - ``pre_llm_call`` hook — injects phase context every turn
   - ``pre_tool_call`` hook — blocks out-of-phase tool use
-  - ``post_tool_call`` hook — auto-detects modifying from write_file/patch
+  - ``post_tool_call`` hook — [HARNESS:] markers, auto-loading, transitions
   - ``on_session_start`` hook — resets on new session
   - 5 bundled skills (namespaced ``work-principles:*``)
 """
@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger("work-principles")
 
-# Plugin lives under work-principles/plugin/, resolve skills/ relative to it
+# Plugin lives under work-principles/plugin/discipline/, resolve skills/
 PLUGIN_DIR = Path(__file__).parent.resolve()
 SKILLS_DIR = PLUGIN_DIR / "skills"
 
@@ -63,12 +64,12 @@ def _register_set_phase_tool(ctx) -> None:
                     "description": (
                         "New phase.\n"
                         "no_task=idle / casual conversation\n"
-                        "task_started=new task, need to research first\n"
-                        "planning=research done, consult preferences, propose, wait for approval\n"
-                        "accessing_device=need device credentials (transient — returns to previous)\n"
-                        "executing=running the approved plan, no modifications\n"
-                        "modifying=about to modify files/config (transient — returns to previous)\n"
-                        "closing=task complete, run closure checks"
+                        "task_started=new task; research gate active\n"
+                        "planning=research done; propose plan; wait for approval\n"
+                        "accessing_device=need device credentials (transient)\n"
+                        "executing=running the approved plan\n"
+                        "modifying=about to modify files/config (transient)\n"
+                        "closing=task complete; run closure checks"
                     ),
                 },
                 "reason": {
@@ -94,7 +95,9 @@ def _register_set_phase_tool(ctx) -> None:
                 "error": f"Invalid phase '{phase_name}'. Valid: {phases}",
             })
 
-        new_state = set_phase(phase, reason)
+        session_id = os.environ.get("HERMES_SESSION_ID") or kwargs.get("session_id")
+        new_state = set_phase(phase, reason, session_id=session_id)
+
         msg = f"Phase set to: {phase.value}"
         if reason:
             msg += f"  (reason: {reason})"
