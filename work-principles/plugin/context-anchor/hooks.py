@@ -1,130 +1,86 @@
 """Context-anchor hooks for Hermes plugin system.
 
-on_pre_llm_call:   Injects [AGENT CONTEXT] header into system prompt before each LLM call.
-on_post_tool_call: Detects SSH enter/exit, records session IDs, and infers task context
-                   from any terminal command via generative verb:subject extraction
-                   (no fixed category list — covers everything).
+on_pre_llm_call:   Injects a [CONTEXT ANCHOR] block into the system prompt
+                   with per-session mission, host, task, key facts, and last tool.
 
-NOTE: Uses relative imports within the plugin package (Hermes loads via importlib)."""
+on_post_tool_call: Tracks ALL tools, detects SSH enter/exit, infers task from
+                   terminal commands, and parses #anchor: annotations.
 
-from .state import get_state, set_host, record_session, set_task, extract_ssh_target, is_exit_command
+v2.1.0 — Fully per-session via database backend. No cross-session contamination.
+"""
+
+from .state import (
+    get_state, set_host, record_session, set_task, set_mission, set_last_tool,
+    add_fact, remove_fact, clear_facts, teardown,
+    extract_ssh_target, is_exit_command, parse_anchor_annotations,
+)
 import subprocess
-import shlex
 from datetime import datetime, timezone
 
 LOG_PREFIX = "[context-anchor]"
 
-# Tokens to strip from the start of commands before extracting verb
-_COMMAND_PREFIXES = frozenset({"sudo", "time", "nohup", "setsid", "env", "noglob", "doas"})
-# Commands whose subject is the SSH target host
+_TOOL_PREFIXES = frozenset({"sudo", "time", "nohup", "setsid", "env", "noglob", "doas"})
 _SSH_LIKE = frozenset({"ssh", "sshpass", "scp", "rsync", "sftp"})
 
 
+# ── Helpers ─────────────────────────────────────────────────────────
+
+
 def _infer_task(command: str) -> str:
-    """Extract a descriptive 'verb:subject' from any terminal command.
-
-    Always returns a string — no categories, no gaps, no exhaustive list to maintain.
-    Examples::
-
-        ssh -p 2222 root@100.64.0.1          → "ssh:100.64.0.1"
-        grep dm_topic ~/.hermes/logs/log     → "grep:gateway.log"
-        emerge -uDN @world                   → "emerge:world"
-        cat /etc/sysctl.conf                 → "cat:sysctl.conf"
-        python3 scripts/test.py              → "python3:test.py"
-        curl https://api.example.com/v1      → "curl:api.example.com"
-        nmcli connection show                → "nmcli:connection"
-        docker ps --all                      → "docker:ps"
-        journalctl -u sshd --no-pager        → "journalctl:sshd"
-        dmesg | grep error                   → "dmesg:error"
-        ls -la /etc/ssh/                     → "ls:ssh"
-        cd ~/Projects/astra/                 → "cd:astra"
-    """
+    """Extract 'verb:subject' from any terminal command."""
+    import shlex
     try:
         tokens = shlex.split(command)
     except ValueError:
         tokens = command.split()
-
     if not tokens:
         return "noop"
-
-    # Strip leading prefix noise
-    while tokens and tokens[0] in _COMMAND_PREFIXES:
+    while tokens and tokens[0] in _TOOL_PREFIXES:
         tokens.pop(0)
     if not tokens:
         return "noop"
-
     verb = tokens[0]
-
-    # --- SSH-like: extract target host (skip flags, strip user@ and port) ---
     if verb in _SSH_LIKE:
         for t in tokens[1:]:
             if not t.startswith("-") and "=" not in t:
                 target = t.split("@")[-1].split(":")[0]
                 return f"ssh:{target}"
         return "ssh"
-
-    # --- Pipe chains: find the pipe position, search for subject only before it ---
     pipe_at = None
     for i, t in enumerate(tokens):
         if t == "|":
             pipe_at = i
             break
-
     search_until = pipe_at if pipe_at is not None else len(tokens)
-
-    # --- Generic: find first non-flag positional arg as subject ---
     for t in tokens[1:search_until]:
         if t.startswith("-"):
             continue
         if t in {">", ">>", "<", "2>", "&>", "|", ";", "&&", "||"}:
             continue
-        subject = _shorten_subject(t)
-        return f"{verb}:{subject}"
-
-    # --- No subject found — just the verb ---
+        subj = _shorten(t)
+        return f"{verb}:{subj}"
     return verb
 
 
-def _shorten_subject(s: str) -> str:
-    """Shorten a subject to its most identifiable fragment."""
-    # URL: keep hostname
+def _shorten(s: str) -> str:
     if s.startswith(("http://", "https://")):
-        # https://host/path → extract host
-        after_slashes = s.split("//", 1)[-1] if "//" in s else s
-        host = after_slashes.split("/")[0].split(":")[0]  # strip port too
-        return host
-    # Path: last component (basename)
+        after = s.split("//", 1)[-1] if "//" in s else s
+        return after.split("/")[0].split(":")[0]
     if "/" in s:
         base = s.rstrip("/").split("/")[-1]
-        if len(base) > 35:
-            base = base[:32] + "..."
-        return base
-    # Quoted multi-word: first word only
+        return base[:32] + "..." if len(base) > 35 else base
     if " " in s and not s.startswith(("'", '"')):
         return s.split()[0]
-    # Truncate extreme length
-    if len(s) > 35:
-        return s[:32] + "..."
-    return s
+    return s[:32] + "..." if len(s) > 35 else s
 
 
 def _debounce_task_update(state: dict, new_task: str) -> bool:
-    """Return True if current_task should be updated.
-
-    Prevents flip-flopping: only allow a task change if:
-    - The task is actually different from current
-    - More than 5 minutes have passed since last state update
-    - OR the current task is the stale default "awaiting-user-input" / "testing"
-    """
-    current_task = state.get("current_task", "")
-    if current_task == new_task:
+    """Return True if current_task should be updated (5-min debounce)."""
+    cur = state.get("current_task", "")
+    if cur == new_task:
         return False
-
-    # Always replace stale/noop defaults immediately
-    if current_task in ("awaiting-user-input", "testing", ""):
+    if cur in ("awaiting-user-input", "testing", ""):
         return True
-
-    # Otherwise debounce: wait 5 min between task changes
     updated_at = state.get("updated_at", "")
     if updated_at:
         try:
@@ -137,67 +93,135 @@ def _debounce_task_update(state: dict, new_task: str) -> bool:
     return True
 
 
-def on_pre_llm_call(*args, **kwargs) -> str:
-    """Inject [AGENT CONTEXT] header before every LLM call.
-
-    Hermes passes system_prompt as the first positional argument.
-    Returns modified system_prompt (first arg) if available.
-    """
-    state = get_state()
+def _build_anchor_block(state: dict) -> str:
+    """Build a structured [CONTEXT ANCHOR] block from per-session state."""
     host = state.get("current_host", "unknown")
+    local = state.get("local_host", "")
     task = state.get("current_task", "awaiting-user-input")
-    thread_ids = state.get("thread_session_ids", [])
-    thread_hint = ""
-    if thread_ids:
-        last_id = thread_ids[-1]
-        thread_hint = (
-            f"\n[THREAD HISTORY] {len(thread_ids)} session(s)"
-            f" in this thread. Last: {last_id}"
-        )
+    mission = state.get("current_mission", "")
+    last_tool = state.get("last_tool", "")
+    facts = state.get("key_facts", {})
 
-    header = f"\n[AGENT CONTEXT] host={host} | task={task}{thread_hint}\n"
+    if local and host and host != local:
+        host_line = f"Host:      {local} → ssh:{host}"
+    else:
+        host_line = f"Host:      {host}"
 
-    # Return modified system_prompt if the positional arg is provided
+    mission_line = f"Mission:   {mission}" if mission else "Mission:   (not set — use #anchor:mission <text>)"
+    task_line = f"Current:   {task}"
+    tool_line = f"Last tool: {last_tool}" if last_tool else ""
+
+    lines = ["[CONTEXT ANCHOR]"]
+    lines.append(f"  {mission_line}")
+    lines.append(f"  {task_line}")
+    lines.append(f"  {host_line}")
+    if tool_line:
+        lines.append(f"  {tool_line}")
+    if facts:
+        lines.append("  Key Facts:")
+        for k in sorted(facts.keys()):
+            lines.append(f"    • {k}: {facts[k]}")
+    lines.append("[/CONTEXT ANCHOR]")
+    return "\n".join(lines)
+
+
+# ── Tool call summariser ───────────────────────────────────────────
+
+
+def _summarise_tool_args(tool_name: str, args: dict | None) -> str:
+    if not args:
+        return ""
+    if tool_name == "terminal":
+        cmd = args.get("command", "")
+        return cmd[:47] + "..." if len(cmd) > 50 else cmd
+    if tool_name in ("read_file", "write_file"):
+        return args.get("path", "")
+    if tool_name == "web_search":
+        return f'"{args.get("query", "")[:40]}"'
+    if tool_name == "web_extract":
+        urls = args.get("urls", [])
+        return urls[0][:50] if urls else ""
+    if tool_name == "session_search":
+        q = args.get("query", "")
+        return f'"{q[:40]}"' if q else "browse"
+    if tool_name in ("skill_view", "skill_manage"):
+        return args.get("name", "")
+    if tool_name == "vision_analyze":
+        return args.get("image_url", "")[:40]
+    return ""
+
+
+# ── Hooks ──────────────────────────────────────────────────────────
+
+
+def on_pre_llm_call(*args, **kwargs) -> str:
+    """Inject [CONTEXT ANCHOR] block before each LLM call.
+
+    Attempts to read session_id from kwargs. Falls back to empty
+    template if unavailable (safe — no crash, just no saved context).
+    """
+    session_id = kwargs.get("session_id") or kwargs.get("session", "")
+    state = get_state(session_id) if session_id else get_state(None)
+    block = _build_anchor_block(state)
+    header = f"\n\n{block}\n"
     if args:
-        return header + args[0]
-    # Fallback — kwargs (unlikely but keep for safety)
-    system_prompt = kwargs.get("system_prompt", "")
-    return header + system_prompt
+        return args[0] + header
+    return (kwargs.get("system_prompt", "") or "") + header
 
 
 def on_post_tool_call(tool_name: str, args: dict | None = None, result: str = None, **kwargs):
-    """Auto-detect SSH, record session IDs, and infer task context.
+    """Track tools, detect SSH/exit, parse annotations.
 
-    Called by Hermes after EVERY tool invocation. The session_id parameter
-    is provided by the plugin framework for sessions that have one.
-
-    Hermes post_tool_call signature:
-      (tool_name, args, result, task_id, duration_ms)
-    Prior code assumed the first positional was "result" which was actually
-    tool_name — using args or result below for the command string.
+    All state operations are scoped to session_id from kwargs.
     """
-    # ALWAYS record session_id first — before the early return for
-    # non-terminal tool results. This was the root cause of the
-    # empty thread_session_ids bug.
-    if session_id := kwargs.get("session_id"):
-        record_session(session_id)
+    session_id = kwargs.get("session_id") or kwargs.get("session", "")
+    if not session_id:
+        return  # can't persist without a session id
 
-    # Extract command: try args dict first (it carries the actual params),
-    # fall back to result string (for terminals without structured args).
     _a = args if isinstance(args, dict) else {}
     command = _a.get("command", "") or (result or "")
-    if not command:
-        # Non-terminal tool (read_file, web_search, session_search…)
+
+    # Ensure session row exists
+    state = get_state(session_id)
+    record_session(session_id, local_hostname=state.get("local_host", ""))
+
+    # ── Parse #anchor: annotations ────────────────────────────
+    if tool_name == "terminal" and command:
+        annotations = parse_anchor_annotations(command)
+        for action, ann_args in annotations:
+            if action == "mission" and ann_args:
+                set_mission(session_id, ann_args[0])
+                print(f"{LOG_PREFIX} Mission ← {ann_args[0]}")
+            elif action == "fact" and len(ann_args) >= 2:
+                add_fact(session_id, ann_args[0], ann_args[1])
+                print(f"{LOG_PREFIX} Fact: {ann_args[0]} = {ann_args[1]}")
+            elif action == "fact-" and ann_args:
+                if remove_fact(session_id, ann_args[0]):
+                    print(f"{LOG_PREFIX} Fact removed: {ann_args[0]}")
+            elif action == "facts-clear":
+                clear_facts(session_id)
+                print(f"{LOG_PREFIX} All facts cleared")
+
+    # ── Track last tool (EVERY tool) ───────────────────────────
+    summary = _summarise_tool_args(tool_name, _a)
+    set_last_tool(session_id, tool_name, summary)
+
+    # ── SSH detection (terminal only) ──────────────────────────
+    if tool_name != "terminal":
         return
 
-    # SSH enter — detect ssh user@host or ssh host
     ssh_target = extract_ssh_target(command)
     if ssh_target:
         print(f"{LOG_PREFIX} SSH detected -> {ssh_target}")
-        set_host(ssh_target)
+        try:
+            local = subprocess.run(
+                ["hostname", "-s"], capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+        except Exception:
+            local = "localhost"
+        set_host(session_id, ssh_target, local_host=local)
         return
 
-    # SSH exit — detect exit / logout / quit
     if is_exit_command(command):
         print(f"{LOG_PREFIX} Exit detected -> resetting host")
         try:
@@ -206,13 +230,13 @@ def on_post_tool_call(tool_name: str, args: dict | None = None, result: str = No
             ).stdout.strip()
         except Exception:
             host = "localhost"
-        set_host(host)
+        set_host(session_id, host, local_host=host)
         return
 
-    # Task inference from terminal command keywords
+    # ── Task inference (debounced) ─────────────────────────────
     task = _infer_task(command)
-    state = get_state()
+    state = get_state(session_id)
     if _debounce_task_update(state, task):
         old_task = state.get("current_task", "")
         print(f"{LOG_PREFIX} Task: {old_task} -> {task}")
-        set_task(task)
+        set_task(session_id, task)
