@@ -24,10 +24,12 @@ components:
   - type: skill
     name: execution-framework
     repo: alrcatraz/astra-skill-execution-framework
-    version: 2.0.0
+    version: 2.0.2
     description: >
-      Task classification and routing. Self-evolving: auto-detects new skills
-      via sync-routing.py and suggests routing table updates.
+      Task classification and routing (manual-only, keyword-based
+      recommendation tool). No longer part of the agentic harness —
+      work-principles plugin handles routing via phase gates and
+      tool-triggered auto-loading.
     status: active
     depends_on:
       - repo: alrcatraz/astra-aiagent-infra
@@ -79,8 +81,8 @@ components:
   - type: tutorial
     name: hermes-agent-tutorial
     repo: alrcatraz/hermes-agent-tutorial
-    version: 3.0.0
-    description: Hermes Agent from scratch (3 volumes)
+    version: 3.1.0
+    description: Hermes Agent from scratch (3 volumes), v3.1
     lang: [zh-CN, en]
     status: active
     depends_on: []
@@ -210,9 +212,9 @@ components:
     status: active
     depends_on:
       - repo: alrcatraz/astra-knowledge-base-mcp
-        resource: Shared SQLite database via ASTRA_KB_PATH
+        resource: PostgreSQL astra_kb database via ASTRA_KB_PG_DSN
         required: recommended
-        reason: Incident data layer — health-scan.py, triage.py, and learn.py share the same DB
+        reason: Incident data layer — health-scan.py, triage.py, and learn.py share the same PG DB
     lifecycle:
       closure:
         - id: sre-health-scan
@@ -241,14 +243,12 @@ components:
   - type: mcp
     name: astra-knowledge-base
     repo: alrcatraz/astra-knowledge-base-mcp
-    version: 1.1.0
-    description: Knowledge base retrieval MCP service
+    version: 1.2.0
+    description: Knowledge base retrieval MCP service (PostgreSQL + pgvector)
     transport: stdio
     status: active
     depends_on: []
 
-  
-  
   # ── Plugins ────────────────────────────────────────────────
   - type: plugin
     name: context-anchor
