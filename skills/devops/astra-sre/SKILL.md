@@ -20,19 +20,14 @@ related_skills:
   - infrastructure-device-inventory
   - service-inventory
   - crash-marker-pattern
-  - full-e2ee-recovery-after-server-rebuild
+  - astra-sre-fix-e2ee
   - pre-upgrade-server-backup
 triggers:
   - astra-sre
-  - unified
-  - coordinating
-  - layer
-  - multi
-  - node
-  - infrastructure
-  - orchestrates
-  - health
-  - scanning
+  - SRE health scan
+  - incident triage
+  - multi node diagnostics
+  - site reliability check
 ---
 
 # astra-sre — Unified Infrastructure Reliability
@@ -60,8 +55,8 @@ astra-sre (orchestrator)
        │
        ▼ calls upon
   ┌──────────────┬──────────────┬────────────────┐
-  │ server-      │  crash-      │  full-e2ee-    │
-  │ restart-     │  marker-     │  recovery-     │
+  │ server-      │  crash-      │  astra-sre-    │
+  │ restart-     │  marker-     │  fix-e2ee-     │
   │ recovery     │  pattern     │  after-...      │
   │ (skill)      │  (skill)     │  (skill)        │
   └──────────────┴──────────────┴────────────────┘
@@ -120,7 +115,7 @@ astra-sre (orchestrator)
 - **Lock mechanism with stale-PID detection** — lock files at `/tmp/astra-sre-lock-<tag>.lock` contain PID + timestamp. On acquire: if old PID is dead → auto-clear (handles SIGKILL / crash residuals). `kill -0 <PID>` for liveness check (sends no signal). No hard timeout — repair may take hours (e.g. `zypper dup`).
 - **Single repair per problem class at a time** — lock by incident tag prevents watchdog and diagnose from stepping on each other.
 - Full design: `~/Projects/astra/astra-sre/references/phase3-design.md`
-- **Existing skill integration needed**: `full-e2ee-recovery-after-server-rebuild` and `astra-sre-fix-e2ee` need their steps classified L1/L2/L3 so auto-safe steps can run without user confirmation. See `references/phase3-design.md` for the classification table.
+- **Existing skill integration needed**: `astra-sre-fix-e2ee` needs its steps classified L1/L2/L3 so auto-safe steps can run without user confirmation. See `references/phase3-design.md` for the classification table.
 
 **Current sub-skills:** (5 total in `sre/` category)
 | Sub-skill | Level | Status | Created |
@@ -208,7 +203,7 @@ Same fault, second occurrence
 | `server-health-audit` | Periodic full audit (disk, mem, proc, net, cron, leaks) |
 | `crash-marker-pattern` | Offline crash notification via marker files |
 | `server-restart-recovery` | Full post-restart recovery playbook (pre-flight + post-verification) |
-| `full-e2ee-recovery-after-server-rebuild` | Specialised E2EE Gateway recovery |
+| `astra-sre-fix-e2ee` | Specialised E2EE Gateway recovery |
 | `pre-upgrade-server-backup` | Layered backup before any destructive operation |
 
 ## Knowledge Base Spaces
