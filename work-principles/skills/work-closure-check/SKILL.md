@@ -4,6 +4,16 @@ description: "Mandatory closure checklist when wrapping up a task: confirm succe
 version: 1.1.0+local.1
 author: alrcatraz
 platforms: [linux]
+triggers:
+  - "wrap up task"
+  - "closure checklist"
+  - "cleanup after work"
+  - "confirm success"
+  - "skill update needed"
+  - "credential leak check"
+  - "收尾"
+  - "完成"
+  - "验证完"
 ---
 
 # Work Closure Check
