@@ -1,8 +1,12 @@
 """work-principles plugin: state machine — phase definitions and persistence.
 
 Each Hermes session uses its own state file (state_{session_id}.json) to
-prevent cross-session interference.  Sessions without HERMES_SESSION_ID
-fall back to the shared state.json.
+prevent cross-session interference.  Session identity is passed **explicitly**
+from the hook kwargs (Hermes injects ``session_id=agent.session_id`` at every
+hook call site); the ``HERMES_SESSION_ID`` environment variable is only a
+fallback for callers without a session (e.g. cron jobs) and must never be
+relied on for isolation — ``os.environ`` is process-global and gets
+overwritten by whichever agent initialised last in the serve process.
 """
 
 from __future__ import annotations
@@ -48,12 +52,14 @@ class Phase(str, Enum):
 TRANSIENT_PHASES: set[Phase] = {Phase.ACCESSING_DEVICE, Phase.MODIFYING}
 
 
-def _current_session_id() -> str | None:
+def _fallback_session_id() -> str | None:
+    """Env fallback only — process-global, NOT safe for multi-session isolation."""
     return os.environ.get("HERMES_SESSION_ID") or None
 
 
-def _state_path() -> Path:
-    sid = _current_session_id()
+def _state_path(session_id: str | None = None) -> Path:
+    """Per-session state file.  Explicit session_id wins; env is last resort."""
+    sid = session_id or _fallback_session_id()
     if sid:
         return PERSISTENT_DIR / f"state_{sid}.json"
     return STATE_FILE
@@ -63,10 +69,12 @@ def _ensure_dir() -> None:
     PERSISTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _write(state: dict) -> None:
+def _write(state: dict, session_id: str | None = None) -> None:
     now = datetime.now().isoformat()
     state["updated_at"] = now
-    path = _state_path()
+    if session_id:
+        state["session_id"] = session_id
+    path = _state_path(session_id)
     with open(path, "w") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
@@ -89,16 +97,16 @@ def default_state() -> dict:
     }
 
 
-def get() -> dict:
+def get(session_id: str | None = None) -> dict:
     """Read current state (thread-safe) from the per-session file."""
     _ensure_dir()
-    path = _state_path()
+    path = _state_path(session_id)
     try:
         state = json.load(open(path))
         return state
     except (FileNotFoundError, json.JSONDecodeError):
         state = default_state()
-        _write(state)
+        _write(state, session_id)
         return state
 
 
@@ -109,9 +117,10 @@ def set_phase(phase: Phase, reason: str | None = None,
     - Entering a TRANSIENT phase saves ``previous_phase`` (unless already
       inside a transient — no double-wrapping).
     - Leaving a TRANSIENT phase clears ``previous_phase``.
+    - Leaving CLOSING clears any pending closure-bypass warning.
     """
     with _lock:
-        state = get()
+        state = get(session_id)
         current = Phase(state.get("phase", Phase.NO_TASK.value))
 
         if phase in TRANSIENT_PHASES:
@@ -126,14 +135,17 @@ def set_phase(phase: Phase, reason: str | None = None,
         state["phase_changed_at"] = now
         state["last_reason"] = reason
 
+        if phase != Phase.CLOSING and state.get("closure_bypass_warning"):
+            state["closure_bypass_warning"] = False
+
         if session_id:
             state["session_id"] = session_id
         else:
-            current_sid = _current_session_id()
+            current_sid = _fallback_session_id()
             if current_sid:
                 state["session_id"] = current_sid
 
-        _write(state)
+        _write(state, session_id)
 
     return state
 
@@ -142,17 +154,17 @@ def reset(session_id: str | None = None) -> dict:
     """Reset to NO_TASK for a new session."""
     state = default_state()
     state["session_id"] = session_id
-    _write(state)
+    _write(state, session_id)
     return state
 
 
 # ── Research gate helpers ──────────────────────────────────────────────
 
-def set_research_detected() -> None:
+def set_research_detected(session_id: str | None = None) -> None:
     """Activate the research gate for the current session."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
@@ -160,14 +172,14 @@ def set_research_detected() -> None:
             pass
         state["research_detected"] = True
         state["research_activity_this_turn"] = False
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)
 
 
-def clear_research_detected() -> None:
+def clear_research_detected(session_id: str | None = None) -> None:
     """Deactivate the research gate — agent may now execute."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
@@ -175,60 +187,60 @@ def clear_research_detected() -> None:
             pass
         state["research_detected"] = False
         state["research_activity_this_turn"] = False
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)
 
 
-def set_research_activity() -> None:
+def set_research_activity(session_id: str | None = None) -> None:
     """Mark that at least one research tool was used this turn."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         state["research_activity_this_turn"] = True
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)
 
 
-def set_auto_loaded_skill(skill_name: str) -> None:
+def set_auto_loaded_skill(skill_name: str, session_id: str | None = None) -> None:
     """Record a tool-triggered auto-loaded skill for injection next turn."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         state["auto_loaded_skill"] = skill_name
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)
 
 
-def set_closure_bypass() -> None:
+def set_closure_bypass(session_id: str | None = None) -> None:
     """Mark that the agent tried to skip the closing checklist."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         state["closure_bypass_warning"] = True
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)
 
 
-def clear_closure_bypass() -> None:
+def clear_closure_bypass(session_id: str | None = None) -> None:
     """Clear the closure bypass warning."""
     with _lock:
         state = default_state()
-        path = _state_path()
+        path = _state_path(session_id)
         try:
             existing = json.load(open(path))
             state.update(existing)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         state["closure_bypass_warning"] = False
-        path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _write(state, session_id)

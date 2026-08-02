@@ -10,17 +10,26 @@ pre_tool_call
   - terminal(ssh/scp/…) → blocked unless phase=accessing_device
 
 post_tool_call
-  - Detects [HARNESS:] markers in output → transitions phase
   - Auto-detects write/patch in EXECUTING → auto-transition to MODIFYING
   - Tool-Trigger auto-skill loading (browser→camofox, skill_manage→skill-creator, etc.)
 
+post_llm_call
+  - Detects [HARNESS:] markers in the assistant's final response and
+    transitions phase.  This is the ONLY marker source.  Tool outputs are
+    world content (file reads, search results) and are never scanned —
+    otherwise reading the plugin's own source would trigger false
+    transitions (e.g. the CLOSING template mentions the marker text).
+
 on_session_start
   Reset state to NO_TASK.
+
+Session isolation: every hook receives ``session_id=agent.session_id``
+from Hermes.  We thread it explicitly through every state call — the
+process-global ``HERMES_SESSION_ID`` env var is never used for isolation.
 """
 
 from __future__ import annotations
 
-import json as _json
 import logging
 import re
 from pathlib import Path
@@ -41,6 +50,13 @@ from .state import (
 
 logger = logging.getLogger("work-principles")
 
+
+def _session_from_kwargs(kwargs: dict) -> str | None:
+    """Extract the per-session id Hermes injects into hook kwargs."""
+    sid = kwargs.get("session_id") or kwargs.get("session") or ""
+    return str(sid) or None
+
+
 # ── Gate audit logging ──────────────────────────────────────────────────
 import json as _json_audit
 from datetime import datetime as _dt_audit
@@ -50,7 +66,8 @@ _GATE_AUDIT_LOG = Path.home() / ".hermes" / "persistent" / "gate-audit.log"
 
 def _log_gate_block(gate: str, tool_name: str, phase: str,
                     command: str = "",
-                    reason: str = "") -> None:
+                    reason: str = "",
+                    session_id: str | None = None) -> None:
     """Append a structured JSON line to the gate audit log."""
     try:
         _GATE_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +78,7 @@ def _log_gate_block(gate: str, tool_name: str, phase: str,
             "phase": phase,
             "cmd": command[:120],
             "reason": reason[:200],
+            "session": (session_id or "")[:24],
         }
         with open(_GATE_AUDIT_LOG, "a") as f:
             f.write(_json_audit.dumps(entry, ensure_ascii=False) + "\n")
@@ -135,6 +153,9 @@ _READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "wget": frozenset({
         "--spider",
     }),
+    "psql": frozenset({  # Only SELECT/SHOW/EXPLAIN-style queries are read-only
+        "-c", "--command",
+    }),
 }
 
 # Tools that are always allowed during research (research tools)
@@ -191,7 +212,13 @@ def _is_read_only_command(command: str) -> bool:
 
     base = tokens[0]
 
-    # Check always-read-only commands first
+    # Multi-word whitelist entries (e.g. "nmcli general", "python3 --version",
+    # "git --version", "command -v") match as command prefixes.
+    for entry in _READ_ONLY_COMMANDS:
+        if " " in entry and (cmd == entry or cmd.startswith(entry + " ")):
+            return True
+
+    # Check always-read-only commands first (single-word entries)
     if base in _READ_ONLY_COMMANDS:
         return True
 
@@ -202,16 +229,54 @@ def _is_read_only_command(command: str) -> bool:
             # Empty set means the command itself is always read-only
             # (e.g. journalctl is always read-only)
             return True
-        if len(tokens) >= 2:
-            # Check first subcommand
-            sub = tokens[1]
-            if sub in allowed:
-                return True
-            # Check two-word pattern (e.g. "docker network ls")
-            if len(tokens) >= 3:
-                two_word = f"{tokens[1]} {tokens[2]}"
-                if two_word in allowed:
+        # Find the first non-option token (skips -C <path>, --no-pager, …)
+        idx = 1
+        while idx < len(tokens):
+            tok = tokens[idx]
+            if tok in ("-C", "-c") and idx + 1 < len(tokens) and base in ("git", "psql"):
+                # git -C <dir> … / psql -c <query> … — skip flag + its argument
+                sub = tokens[idx + 1].lower()
+                if base == "psql":
+                    # psql -c "<SQL>" — only SELECT/SHOW/EXPLAIN/DESCRIBE
+                    stripped = sub.lstrip("() ")
+                    if stripped.startswith(("select", "show", "explain",
+                                            "describe", "\\d", "--")):
+                        return True
+                    return False
+                idx += 2
+                continue
+            if tok.startswith("-"):
+                # Flags that are themselves read-only markers (e.g. curl -I)
+                if tok in allowed:
                     return True
+                # Other flags: -p, --no-pager, --version, -h … are read-only
+                # when they don't take a path argument we must skip.
+                if tok in ("--no-pager", "--version", "--help", "-h", "-v",
+                           "--short", "--stat", "--name-only", "--oneline",
+                           "--format", "--pretty", "--date"):
+                    idx += 1
+                    continue
+                if base == "git" and tok in ("-c", "--config") and idx + 1 < len(tokens):
+                    idx += 2
+                    continue
+                if tok.startswith("--") and "=" in tok:
+                    idx += 1
+                    continue
+                # Unknown flag — skip it (flags don't change read-only-ness
+                # of the subcommand we're about to inspect)
+                idx += 1
+                continue
+            break
+        if idx >= len(tokens):
+            return False
+        sub = tokens[idx]
+        if sub in allowed:
+            return True
+        # Check two-word pattern (e.g. "docker network ls")
+        if idx + 1 < len(tokens):
+            two_word = f"{tokens[idx]} {tokens[idx + 1]}"
+            if two_word in allowed:
+                return True
 
     return False
 
@@ -322,7 +387,6 @@ _MESSAGE_TEMPLATES: dict[Phase, str | None] = {
         "  ✅ Step transparency: explain before acting\n"
         "  ✅ Progressive verification: verify after each step\n"
         "  ✅ Dependency-first: bottom-up when troubleshooting\n"
-        "  ✅ Skill-first: load a skill if one exists for the operation\n"
         "If you need to modify files → call discipline_set_phase('modifying', ...)"
     ),
     Phase.MODIFYING: (
@@ -332,19 +396,19 @@ _MESSAGE_TEMPLATES: dict[Phase, str | None] = {
         "Complete modifications before leaving this phase."
     ),
     Phase.CLOSING: (
-        "⚙ Discipline: phase=closing\\n"
-        "You MUST run the full closure checklist before finishing:\\n"
-        "  ⓪ System-config backup & credential leak scan\\n"
-        "  ① Skill update check\\n"
-        "  ② Decision record\\n"
-        "  ③ Service/device registration\\n"
-        "  ④ Information storage audit\\n"
-        "  ⑤ Environment baseline comparison\\n"
-        "  ⑥ Git commit housekeeping\\n"
-        "\\n"
-        "The CLOSING phase cannot be bypassed.  You must include\\n"
-        "[HARNESS: done] in your final response to exit this phase.\\n"
-        "Other [HARNESS:] markers (task_started/plan/casual) are\\n"
+        "⚙ Discipline: phase=closing\n"
+        "You MUST run the full closure checklist before finishing:\n"
+        "  ⓪ System-config backup & credential leak scan\n"
+        "  ① Skill update check\n"
+        "  ② Decision record\n"
+        "  ③ Service/device registration\n"
+        "  ④ Information storage audit\n"
+        "  ⑤ Environment baseline comparison\n"
+        "  ⑥ Git commit housekeeping\n"
+        "\n"
+        "The CLOSING phase cannot be bypassed.  You must include\n"
+        "[HARNESS: done] in your final response to exit this phase.\n"
+        "Other [HARNESS:] markers (task_started/plan/casual) are\n"
         "rejected while in CLOSING."
     ),
 }
@@ -354,7 +418,8 @@ _MESSAGE_TEMPLATES: dict[Phase, str | None] = {
 
 def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
     """Block tools that don't match the current phase or research gate."""
-    state = get()
+    sid = _session_from_kwargs(kwargs)
+    state = get(sid)
     phase_name = state.get("phase", Phase.NO_TASK.value)
     try:
         current_phase = Phase(phase_name)
@@ -376,7 +441,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             _log_gate_block("research", tool_name,
                             current_phase.value,
                             command=command,
-                            reason="non-readonly terminal during research")
+                            reason="non-readonly terminal during research",
+                            session_id=sid)
             return {
                 "action": "block",
                 "message": (
@@ -389,7 +455,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
         # All other tools blocked during research unless in whitelist
         _log_gate_block("research", tool_name,
                         current_phase.value,
-                        reason="non-research tool during research")
+                        reason="non-research tool during research",
+                        session_id=sid)
         return {
             "action": "block",
             "message": (
@@ -404,7 +471,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
     if tool_name in _MODIFYING_TOOLS and current_phase not in _MODIFY_ALLOWED:
         _log_gate_block("modify", tool_name,
                         current_phase.value,
-                        reason=f"write tool in {current_phase.value}")
+                        reason=f"write tool in {current_phase.value}",
+                        session_id=sid)
         return {
             "action": "block",
             "message": (
@@ -421,7 +489,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             cmd_preview = command[:80].replace("\n", "\\n")
             _log_gate_block("ssh", tool_name, current_phase.value,
                             command=command,
-                            reason=f"remote access in {current_phase.value}")
+                            reason=f"remote access in {current_phase.value}",
+                            session_id=sid)
             return {
                 "action": "block",
                 "message": (
@@ -444,7 +513,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
                 return None
             _log_gate_block("closure", tool_name, current_phase.value,
                             command=command,
-                            reason="non-readonly terminal during closing")
+                            reason="non-readonly terminal during closing",
+                            session_id=sid)
             return {
                 "action": "block",
                 "message": (
@@ -458,7 +528,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
             return None
         # Everything else blocked
         _log_gate_block("closure", tool_name, current_phase.value,
-                        reason=f"{tool_name} blocked during closing")
+                        reason=f"{tool_name} blocked during closing",
+                        session_id=sid)
         return {
             "action": "block",
             "message": (
@@ -473,7 +544,8 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
 
 def on_pre_llm_call(*args, **kwargs):
     """Inject phase-appropriate context into every LLM turn."""
-    state = get()
+    sid = _session_from_kwargs(kwargs)
+    state = get(sid)
     phase_name = state.get("phase", Phase.NO_TASK.value)
     try:
         current_phase = Phase(phase_name)
@@ -491,7 +563,7 @@ def on_pre_llm_call(*args, **kwargs):
     if auto_skill:
         state["auto_loaded_skill"] = None
         from .state import _write as _write_state
-        _write_state(state)
+        _write_state(state, sid)
 
     if msg is None:
         return None
@@ -519,12 +591,12 @@ def on_pre_llm_call(*args, **kwargs):
             "The CLOSING phase will not advance until you include "
             "[HARNESS: done] in your response."
         )
-        clear_closure_bypass()
+        clear_closure_bypass(sid)
 
     return {"context": msg}
 
 
-def _hook_arg(key: str, default: str = "", args=None) -> str:
+def _hook_arg(key: str, default: str = "", args=None, **kwargs) -> str:
     """Safely extract a key from the args dict.
 
     Hermes post_tool_call may pass the result string as the second
@@ -546,17 +618,19 @@ def _hook_arg(key: str, default: str = "", args=None) -> str:
 
 def on_post_tool_call(tool_name: str, args: dict | None = None,
                       result=None, **kwargs):
-    """Auto-detect phase transitions from tool usage and [HARNESS:] markers.
+    """Auto-detect phase transitions from tool usage.
 
-    - [HARNESS: task_started] → TASK_STARTED + activate research gate
-    - [HARNESS: plan] → PLANNING + clear research gate
-    - [HARNESS: casual] → NO_TASK (reset)
-    - [HARNESS: done] → CLOSING
     - write_file / patch → auto MODIFYING (when not already in transient)
     - Research tool use during research gate → track activity
     - Tool-trigger auto-skill loading
+
+    NOTE: [HARNESS:] markers are NOT detected here — tool outputs are
+    world content (file reads, search results) and scanning them caused
+    false phase transitions.  Markers are detected exclusively in
+    ``on_post_llm_call`` from the assistant's own response text.
     """
-    state = get()
+    sid = _session_from_kwargs(kwargs)
+    state = get(sid)
     phase_name = state.get("phase", Phase.NO_TASK.value)
     try:
         current = Phase(phase_name)
@@ -566,41 +640,22 @@ def on_post_tool_call(tool_name: str, args: dict | None = None,
     if current in TRANSIENT_PHASES:
         return
 
-    # ── [HARNESS:] marker detection from terminal output ──
-    if tool_name == "terminal":
-        output = (result or {}).get("output", "") if isinstance(result, dict) else ""
-        marker = _detect_harness_markers(output)
-        if marker:
-            _handle_harness_marker(marker, current)
-            return
-
-    # ── [HARNESS:] marker detection from any response ──
-    # Check both result and kwargs for the marker
-    if isinstance(result, dict):
-        text = result.get("output", "") or result.get("content", "")
-    else:
-        text = str(result or "")
-    marker = _detect_harness_markers(text)
-    if marker:
-        _handle_harness_marker(marker, current)
-        return
-
     # ── Research gate: track research activity ──
     research_active = state.get("research_detected", False)
     if research_active and tool_name in _RESEARCH_TOOLS:
-        set_research_activity()
+        set_research_activity(sid)
 
     # ── Auto-detect modifying from write_file/patch ──
     if tool_name in _MODIFYING_TOOLS and current != Phase.MODIFYING:
         file_path = _hook_arg("path", "?", args=args, **kwargs)
-        set_phase(Phase.MODIFYING, f"auto: {tool_name}({file_path})")
+        set_phase(Phase.MODIFYING, f"auto: {tool_name}({file_path})", sid)
         logger.info("auto→modifying via %s(%s)", tool_name, file_path)
         return
 
     # ── Auto-load skill from tool triggers ──
     if tool_name in _TOOL_TRIGGER_SKILLS:
         skill = _TOOL_TRIGGER_SKILLS[tool_name]
-        set_auto_loaded_skill(skill)
+        set_auto_loaded_skill(skill, sid)
         logger.info("auto-skill→%s via %s", skill, tool_name)
 
     # ── Auto-load skill from terminal command triggers ──
@@ -609,7 +664,7 @@ def on_post_tool_call(tool_name: str, args: dict | None = None,
         if command:
             skill = _match_terminal_trigger(command)
             if skill:
-                set_auto_loaded_skill(skill)
+                set_auto_loaded_skill(skill, sid)
 
     # ── Auto-load skill for skill_manage actions ──
     if tool_name == "skill_manage":
@@ -618,22 +673,44 @@ def on_post_tool_call(tool_name: str, args: dict | None = None,
             # Will be picked up by pre_llm_call reminder
             state["skill_manage_pending"] = action
             from .state import _write as _write_state
-            _write_state(state)
+            _write_state(state, sid)
             # Also auto-load skill-creator
-            set_auto_loaded_skill("skill-creator")
+            set_auto_loaded_skill("skill-creator", sid)
             logger.info("auto-skill→skill-creator via skill_manage(%s)", action)
 
     # ── Research/exploration tools → auto TASK_STARTED (from NO_TASK) ──
     if current == Phase.NO_TASK and tool_name in (
         "web_search", "session_search", "skill_view",
     ):
-        set_phase(Phase.TASK_STARTED, f"auto: {tool_name}")
-        set_research_detected()
+        set_phase(Phase.TASK_STARTED, f"auto: {tool_name}", sid)
+        set_research_detected(sid)
         logger.info("auto→task_started via %s", tool_name)
 
 
+def on_post_llm_call(*args, assistant_response: str | None = None, **kwargs):
+    """Detect [HARNESS:] markers in the assistant's final response.
+
+    This is the ONLY source of [HARNESS:] marker detection.  Tool outputs
+    are never scanned (see module docstring).
+    """
+    sid = _session_from_kwargs(kwargs)
+    if not assistant_response:
+        return None
+    marker = _detect_harness_markers(assistant_response)
+    if not marker:
+        return None
+    state = get(sid)
+    try:
+        current = Phase(state.get("phase", Phase.NO_TASK.value))
+    except ValueError:
+        return None
+    _handle_harness_marker(marker, current, sid)
+    return None
+
+
 def _handle_harness_marker(marker: str,
-                            current: Phase) -> None:
+                            current: Phase,
+                            session_id: str | None = None) -> None:
     """Process a [HARNESS:] marker and transition phase accordingly.
 
     If currently in CLOSING phase and the marker is not 'done', this
@@ -642,21 +719,21 @@ def _handle_harness_marker(marker: str,
     """
     # Detect closure bypass: in CLOSING, only [HARNESS: done] is valid
     if current == Phase.CLOSING and marker != "done":
-        set_closure_bypass()
+        set_closure_bypass(session_id)
         logger.info("closure bypass attempty → marker=%s (still in %s)",
                      marker, current.value)
         return
 
     if marker == "task_started":
-        set_phase(Phase.TASK_STARTED, "harness: task_started marker")
-        set_research_detected()
+        set_phase(Phase.TASK_STARTED, "harness: task_started marker", session_id)
+        set_research_detected(session_id)
     elif marker == "plan":
-        set_phase(Phase.PLANNING, "harness: plan marker")
-        clear_research_detected()
+        set_phase(Phase.PLANNING, "harness: plan marker", session_id)
+        clear_research_detected(session_id)
     elif marker == "casual":
-        reset()
+        reset(session_id)
     elif marker == "done":
-        set_phase(Phase.CLOSING, "harness: done marker")
+        set_phase(Phase.CLOSING, "harness: done marker", session_id)
     logger.info("harness marker→%s (phase=%s)", marker, current.value)
 
 
