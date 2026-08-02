@@ -66,7 +66,11 @@ metadata:
 
 ### [HARNESS:] marker system
 
-Agent includes these in text responses to trigger phase transitions:
+Agent includes these in **text responses** to trigger phase transitions.
+Markers are detected exclusively from the assistant's own final response
+(`post_llm_call` hook) — **never** from tool outputs (file reads, search
+results, etc.), so reading plugin source or history containing the marker
+text cannot cause false transitions.
 
 | Marker | Meaning | Phase transition |
 |:-------|:--------|:----------------|
@@ -77,6 +81,14 @@ Agent includes these in text responses to trigger phase transitions:
 
 In CLOSING phase, only `[HARNESS: done]` is accepted — other markers are
 rejected and trigger a bypass warning.
+
+### Session isolation
+
+Every hook receives `session_id=agent.session_id` from Hermes and threads
+it through all state operations.  State files are per-session
+(`state_{session_id}.json`); the process-global `HERMES_SESSION_ID` env
+var is only a fallback for session-less callers (e.g. cron) and is never
+used for isolation.
 
 ### Tool-triggered auto-skill loading
 
