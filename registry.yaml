@@ -101,7 +101,7 @@ components:
     name: work-principles
     repo: alrcatraz/astra-aiagent-infra
     local_path: work-principles/
-    version: 1.0.0
+    version: 1.1.0
     description: >
       Umbrella for work discipline — context anchoring, approval discipline,
       pre-action research, closure check, deploy registration. Replaces
