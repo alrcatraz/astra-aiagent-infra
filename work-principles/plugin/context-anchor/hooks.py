@@ -11,7 +11,7 @@ v2.1.0 — Fully per-session via database backend. No cross-session contaminatio
 
 from .state import (
     get_state, set_host, record_session, set_task, set_mission, set_last_tool,
-    add_fact, remove_fact, clear_facts, teardown,
+    add_fact, remove_fact, clear_facts,
     extract_ssh_target, is_exit_command, parse_anchor_annotations,
 )
 import subprocess
