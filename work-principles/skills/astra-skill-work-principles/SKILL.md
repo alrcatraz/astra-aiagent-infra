@@ -10,6 +10,13 @@ version: 3.0.0
 metadata:
   hermes:
     tags: [work-principles, harness, discipline, phase-gate, agentic-harness]
+triggers:
+  - "agentic harness"
+  - "discipline phase gate"
+  - "work principles"
+  - "phase gate blocked"
+  - "HARNESS marker"
+  - "tool triggered skill loading"
 ---
 
 # work-principles — Agentic Harness
