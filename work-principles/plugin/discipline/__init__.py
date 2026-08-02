@@ -4,7 +4,8 @@ Registers:
   - ``discipline_set_phase`` tool — agent declares phase transitions
   - ``pre_llm_call`` hook — injects phase context every turn
   - ``pre_tool_call`` hook — blocks out-of-phase tool use
-  - ``post_tool_call`` hook — [HARNESS:] markers, auto-loading, transitions
+  - ``post_tool_call`` hook — auto-loading, transitions from tool use
+  - ``post_llm_call`` hook — [HARNESS:] markers from assistant response
   - ``on_session_start`` hook — resets on new session
   - 5 bundled skills (namespaced ``work-principles:*``)
 """
@@ -25,7 +26,13 @@ SKILLS_DIR = PLUGIN_DIR / "skills"
 
 def register(ctx) -> None:
     """Plugin registration — called once at Hermes startup."""
-    from .hooks import on_pre_llm_call, on_pre_tool_call, on_post_tool_call, on_session_start
+    from .hooks import (
+        on_pre_llm_call,
+        on_pre_tool_call,
+        on_post_tool_call,
+        on_post_llm_call,
+        on_session_start,
+    )
     from .state import Phase, set_phase
 
     _register_set_phase_tool(ctx)
@@ -33,11 +40,12 @@ def register(ctx) -> None:
     ctx.register_hook("pre_llm_call", on_pre_llm_call)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("post_tool_call", on_post_tool_call)
+    ctx.register_hook("post_llm_call", on_post_llm_call)
     ctx.register_hook("on_session_start", on_session_start)
 
     _register_bundled_skills(ctx)
 
-    logger.info("work-principles ready — tool + 4 hooks + 5 skills")
+    logger.info("work-principles ready — tool + 5 hooks + 5 skills")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -95,7 +103,9 @@ def _register_set_phase_tool(ctx) -> None:
                 "error": f"Invalid phase '{phase_name}'. Valid: {phases}",
             })
 
-        session_id = os.environ.get("HERMES_SESSION_ID") or kwargs.get("session_id")
+        # Prefer the per-session id injected into tool kwargs; the
+        # process-global env var is only a fallback (see state.py).
+        session_id = kwargs.get("session_id") or os.environ.get("HERMES_SESSION_ID")
         new_state = set_phase(phase, reason, session_id=session_id)
 
         msg = f"Phase set to: {phase.value}"
