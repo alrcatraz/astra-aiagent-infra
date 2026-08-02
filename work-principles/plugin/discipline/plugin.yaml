@@ -1,5 +1,5 @@
 name: work-principles
-version: 1.0.0
+version: 1.1.0
 description: >-
   Work discipline enforcement — phase tracking, context injection,
   and bundled skills.  Part of the work-principles skill.
@@ -12,4 +12,5 @@ provides_hooks:
   - pre_llm_call
   - pre_tool_call
   - post_tool_call
+  - post_llm_call
   - on_session_start
