@@ -21,4 +21,5 @@ mermaid-images/
 
 # Auto-generated - project structure tracking
 .codegraph/
+.graphlint/
 *.bak
