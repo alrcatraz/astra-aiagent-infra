@@ -4,6 +4,16 @@ description: "Mandatory research and index lookup before taking action. When inv
 category: devops
 version: 1.0.0
 author: alrcatraz
+triggers:
+  - "research before action"
+  - "investigation needed"
+  - "credentials required"
+  - "need to look up"
+  - "environment baseline"
+  - "planning proposal"
+  - "方案"
+  - "调研"
+  - "凭证"
 ---
 
 # pre-action-research
