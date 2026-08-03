@@ -79,6 +79,22 @@ Markers are detected exclusively from the assistant's own final response
 results, etc.), so reading plugin source or history containing the marker
 text cannot cause false transitions.
 
+**CRITICAL — marker must be in a pure-text turn, alone.**
+`post_llm_call` fires only at turn end with `final_response` = the final
+text of a turn with NO tool calls (Hermes `conversation_loop` keeps looping
+while the model emits tool_calls; intermediate text inside a tool-calling
+turn is NOT the final response and is never scanned). Therefore:
+
+- ❌ Wrong: `[HARNESS: plan]` + `write_file` in the same message — the marker
+  lives in an intermediate tool-calling turn, is never detected, and the
+  Research Gate stays locked (agent then misreads it as "gate broken").
+- ✅ Correct: send `[HARNESS: plan]` as a **standalone text-only message**
+  (no tool calls). Hermes finalises the turn, `post_llm_call` detects the
+  marker → phase planning + Research Gate cleared. Then write in the next turn.
+
+Same applies to `[HARNESS: task_started]`, `[HARNESS: casual]`,
+`[HARNESS: done]` — all must be pure-text turns.
+
 | Marker | Meaning | Phase transition |
 |:-------|:--------|:----------------|
 | `[HARNESS: task_started]` | This is a real task | Enter task_started + activate Research Gate |
