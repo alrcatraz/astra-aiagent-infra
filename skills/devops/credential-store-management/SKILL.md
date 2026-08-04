@@ -2,7 +2,7 @@
 name: credential-store-management
 description: "Three-layer credential store management — GPG-encrypted YAML for device credentials, KeePassXC for service accounts, .env for bootstrap secrets. Exhaustive search protocol and credential lifecycle workflows."
 category: devops
-version: 1.1.0
+version: 1.2.0
 author: alrcatraz
 metadata:
   hermes:
@@ -99,14 +99,14 @@ Use these in skill documentation as `<token>` placeholders with a comment refere
 
 ```yaml
 devices:
-  <device>:
-    hostname: <device>
+  <device-key>:
+    hostname: <Hostname>
     network:
-      main_ip: <REDACTED>0
+      main_ip: <MAIN-IP>
     accounts:
-      - username: alrcatraz
+      - username: <user>
         access: sudo
-        password: '<REDACTED>'
+        password: <PASSWORD>
         note: sudo 密码
     access:
       methods:
@@ -125,7 +125,7 @@ Each device has:
 GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
   --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | grep -A10 "  <device>:"
+  | grep -A10 "  <device-key>:"
 ```
 
 ### Full decrypt (for editing)
@@ -159,7 +159,9 @@ When you need to run sudo on a device (including the local machine):
 
 ### Step 1: Find the device's sudo password
 
-**Device key convention:** lowercase-no-spaces. `<device>`, `<device>`, `<vps>`, `<device>`, `<device>`, `<router>`, `<device>`, `<device>`.
+**Device key convention:** lowercase-no-spaces. `<device-key>` examples: a
+resident workstation, a storage NAS, a router, a GPU server, etc. — actual keys
+live in the GPG credential store, not in this skill.
 
 ```bash
 GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
@@ -168,7 +170,7 @@ DEVICE_PASS=$(echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinent
   | python3 -c "
 import sys, yaml
 data = yaml.safe_load(sys.stdin)
-device = data.get('devices', {}).get('<device>', {})
+device = data.get('devices', {}).get('<device-key>', {})
 for acct in device.get('accounts', []):
     if acct.get('access') == 'sudo':
         print(acct.get('password', ''))
@@ -212,13 +214,15 @@ rm -f /tmp/sudo-job.sh
 
 ### 1. GPG passphrase in .env is the master key
 
-The `GPG_Key_Alrcatraz` passphrase (`<REDACTED>`) unlocks ALL device secrets. Keep it private.
+The `GPG_Key_Alrcatraz` passphrase (in `~/.hermes/.env`, **never in git or skills**)
+unlocks ALL device secrets. Keep it private. If you suspect exposure, rotate it
+and re-encrypt the GPG stores.
 
 ### 2. Device key ≠ hostname
 
 YAML device keys use lowercase-no-spaces format:
-- `<device>` (not "<device>" or "home-centre-01")
-- `<device>`, `<vps>`, `<device>`, `<device>`, etc.
+- `<device-key>` (not "Hostname" or "host-name") — lowercase-no-spaces format
+- Actual device keys resolve via the GPG credential store, not this skill
 
 Search with `grep -A2 "hostname:.*[part]"` on the decrypted YAML.
 
@@ -228,18 +232,10 @@ Some devices have duplicate `value:` lines (editing artifact). Use the last non-
 
 ### 4. Sudo password differs per device
 
-| Device | Password |
-|--------|----------|
-| <device> | `<REDACTED>` |
-| <device> | `<REDACTED>` |
-| <device> | `<REDACTED>` |
-| <device> | `<REDACTED>` |
-| <router> | `<REDACTED>` |
-| <vps> | `<REDACTED>` |
-| <device> | `<REDACTED>` |
-| <device> | `<REDACTED>` |
-
-Do NOT assume the `.env` SUDO_PASSWORD applies to remote devices.
+Device sudo passwords are **not uniform** — never assume the `.env`
+SUDO_PASSWORD applies to remote devices. Resolve each device's actual password
+from the GPG credential store (`personal-credentials.yaml.gpg` →
+`devices.<key>.accounts[].password`), never from a hardcoded table.
 
 ## References
 
