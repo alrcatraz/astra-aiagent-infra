@@ -110,7 +110,7 @@ cat <content> | gpg --batch --yes --symmetric \
 
 | File | Contains | Example Devices |
 |:-----|:---------|:----------------|
-| `personal-credentials.yaml.gpg` | Personal devices | <device>, <device>, OpenWrt, <device> |
+| `personal-credentials.yaml.gpg` | Personal devices | workstation, NAS, router, laptops |
 | `work-credentials.yaml.gpg` | Work devices | GPU server, BMC, customer environments |
 | `other-credentials.yaml.gpg` | Friends/family | Shared devices, guest access |
 | Not stored | Temporary credentials | One-time use, discarded immediately |
