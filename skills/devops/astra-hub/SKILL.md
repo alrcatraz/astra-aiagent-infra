@@ -1,7 +1,7 @@
 ---
 name: astra-hub
 description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
-version: 1.2.0
+version: 1.3.0
 author: alrcatraz
 platforms: [linux]
 metadata:
@@ -111,6 +111,11 @@ triggers:
 私有副本拉代码更新:
   cd ~/.astra/repos/<repo> && git pull
   个人数据文件（devices.yaml 等）已在 .gitignore，不受影响
+
+⚠️ 例外（历史遗留）：astra-sre 私有副本的 config/devices.yaml 曾被 git 跟踪并推送到
+gitea 私有端（GitHub 公开端无此文件）。它现在是 credential store 的 DERIVED 执行视图
+（见 astra-aiagent-infra/docs/reference-protocol.md Two-Source Model）——改连接信息请改
+GPG 凭证库真源，再同步此文件；勿直接手工编辑。
 
 私有副本添加个人数据:
   把 devices.yaml 放 ~/.astra/repos/<repo>/config/devices.yaml
