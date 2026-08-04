@@ -8,9 +8,8 @@
 ```
 ~/Projects/astra/astra-sre/
 ├── config/
-│   └── devices.yaml           ← 8 devices: <vps>, <vps>, <device>,
-│                                 <device>, <device>, <device>,
-│                                 <router>, star (<device> removed)
+│   └── devices.yaml           ← 8 devices: 4 VPS, NAS, 2 workstations, router
+│                                 (GPU server via jump host)
 ├── scripts/
 │   ├── health-scan.py         ← Primary: Python, supports markdown/JSON
 │   └── health-scan.sh         ← Fallback: Shell, Bash-only alternative
@@ -94,16 +93,18 @@ Home Room — 📊 服务健康/设备监控
 
 ## Device Access Matrix
 
-| Device | SSH Alias | Key | Status |
-|:-------|:----------|:----|:-------|
-| <vps> | `root@<REDACTED>:2222` | `id_ed25519` | ✅ |
-| <vps> | `root@<REDACTED>` | `id_ed25519` | ✅ |
-| <device> | `Alrcatraz@<REDACTED>` | `id_ed25519` | ✅ |
-| <device> | `alrcatraz@<REDACTED>` | `id_ed25519` | ✅ (mobile, may be offline) |
-| <device> | `localhost` | `id_ed25519` | ✅ (this machine) |
-| <device> | `alrcatraz@<REDACTED>` | `id_ed25519` | ✅ (LAN, often offline in this room) |
-| <router> | `root@<REDACTED>:22` | `id_ed25519` | ⚠️ (no key, password access) |
-\| <gpu-server> \| `gpu@<REDACTED>:22` | `id_ed25519` | ✅ (GPU server via jump host) |
+Device access is resolved at runtime from the GPG credential store
+(`personal-credentials.yaml.gpg` → `devices.<key>.network` +
+`connection.paths`) — the matrix below is illustrative only; actual
+addresses/keys live in the store, not in this skill (Two-Source Model,
+`astra-aiagent-infra/docs/reference-protocol.md`).
+
+| Access method | Devices (count) | Status |
+|:--------------|:----------------|:-------|
+| ssh key | 6 | ✅ |
+| local | 1 | ✅ (this machine) |
+| password | 1 | ⚠️ (no key, password access) |
+| ssh key via jump host | 1 | ✅ (GPU server) |
 
 ## Phase 1 Deployment Checklist
 
@@ -113,7 +114,7 @@ Home Room — 📊 服务健康/设备监控
 - [x] Cron job deployed (daily 08:00, `no_agent` mode via shell wrapper + `uv run`)
 - [x] Home room thread created with initial message
 - [x] Device scan verified working for SSH-key-configured machines
-- [ ] SSH key deployment for `<router>` (key: `pending` in config)
+- [ ] SSH key deployment for the router (key: `pending` in config)
 - [ ] `uv run` .venv checked into repo or pyproject.toml for explicit deps
 
 ## Lessons Learned

@@ -1,7 +1,7 @@
 ---
 name: astra-hub
 description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
-version: 1.3.0
+version: 1.4.0
 author: alrcatraz
 platforms: [linux]
 metadata:
@@ -244,13 +244,10 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 
 ### 设备 SSH 别名
 
-| 别名 | 目标 | 身份文件 |
-|:----|:----|:--------|
-| `ssh <vps>` | root@<REDACTED>:2222 | ~/.ssh/id_ed25519 |
-| `ssh <vps>` | root@<REDACTED> | ~/.ssh/id_ed25519 |
-| `ssh <device>` | Alrcatraz@<REDACTED> | ~/.ssh/id_ed25519 |
-| `ssh <device>` | alrcatraz@<REDACTED> | ~/.ssh/id_ed25519_jump_gpu |
-| `ssh <device>` | alrcatraz@<REDACTED> | ~/.ssh/id_ed25519 |
+SSH aliases are defined in `~/.ssh/config` (execution view). Connection
+targets (addresses, keys) resolve via the GPG credential store
+(`personal-credentials.yaml.gpg` → `devices.<key>.network` + `connection.paths`)
+— see `astra-aiagent-infra/docs/reference-protocol.md` (Two-Source Model).
 
 ### 知识库空间一览
 
@@ -264,7 +261,7 @@ Camofox 来自上游项目 `jo-inc/camofox-browser`，fork 到 `alrcatraz/astra-
 ### SSHFS 远程开发挂载
 
 当 VS Code Remote SSH 因 `agent host` bug（1.123.x futex 死锁）不可用时：
-`sshfs <device>-easytier:/remote/path ~/Projects/<device>/`
+`sshfs <host-alias>:/remote/path ~/Projects/<host-alias>/`
 详见 `references/sshfs-remote-setup.md`（含诊断方法、字体配置、sudo 绕过技巧）。
 
 ### 路径速查
