@@ -65,7 +65,7 @@ components:
     name: credential-store-management
     repo: alrcatraz/astra-aiagent-infra
     local_path: skills/devops/credential-store-management/
-    version: 1.0.0
+    version: 1.2.0
     description: >
       Three-layer credential store management — GPG-encrypted YAML for device
       credentials, KeePassXC for service accounts, .env for bootstrap secrets.
@@ -128,7 +128,7 @@ components:
     name: astra-hub
     repo: alrcatraz/astra-aiagent-infra
     local_path: skills/devops/astra-hub/
-    version: 1.3.0
+    version: 1.4.0
     description: "astar-* 生态地图索引：记忆/知识路由、项目索引、凭证安全指南、快速参考"
     status: active
     depends_on: []
