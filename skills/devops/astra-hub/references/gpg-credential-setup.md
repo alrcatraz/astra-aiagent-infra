@@ -5,7 +5,7 @@
 
 ## 前置条件
 
-- NAS (<device>) 可达，GPG 密钥备份在 Utopia/GPG/GPG_Cert/
+- NAS 可达（SSH 别名 `<nas-alias>`，定义于 `~/.ssh/config`），GPG 密钥备份在 Utopia/GPG/GPG_Cert/
 - GPG 已安装
 - Alrcatraz 私钥密码已在 `.env` 中（`GPG_Key_Alrcatraz`）
 
@@ -23,8 +23,8 @@
 ## 从 NAS 获取私钥
 
 ```bash
-ssh <device> 'cat "/volume1/homes/Alrcatraz/Utopia/GPG/GPG_Cert/private_backup/Alrcatraz_SECRET.asc"' \
-  > /tmp/Alrcatraz_SECRET.asc
+ssh <nas-alias> 'cat "<nas-path>/Utopia/GPG/GPG_Cert/private_backup/<key-name>_SECRET.asc"' \
+  > /tmp/<key-name>_SECRET.asc
 ```
 
 ## 导入私钥

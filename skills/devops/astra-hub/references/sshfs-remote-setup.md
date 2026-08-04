@@ -26,7 +26,7 @@ strace -f -o /tmp/vscode-strace.log <pid>
 ### Prerequisites
 
 - SSH key auth configured between machines
-- Remote host available via SSH alias (e.g. `<device>-easytier`)
+- Remote host available via SSH alias (e.g. `<host-alias>-easytier`)
 - Sudo password stored in GPG credentials (`personal-*.gpg`)
 
 ### Install & Mount
@@ -53,7 +53,7 @@ Use `SUDO_ASKPASS` to pipe passwords securely without `sudo -S`:
 # Get password from GPG creds
 gpg --batch --decrypt --pinentry-mode loopback --passphrase "<gpg-pass>" \
   ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | grep <device> -A5 | grep password | cut -d'"' -f2 > /tmp/pass
+  | grep <device-key> -A5 | grep password | cut -d'"' -f2 > /tmp/pass
 
 # Create askpass script
 echo "cat /tmp/pass" | ssh <host> 'cat > /tmp/askpass && chmod +x /tmp/askpass'
