@@ -50,13 +50,30 @@ stored in three places (agent registry / SRE devices.yaml / credential store).
    the KB. Device addresses resolve through `connection.paths` in the machine
    layer; the human layer is out of band.
 
+## Two-Source Model: Source of Truth vs Execution View
+
+A fact has **one source of truth** (where it is owned and edited) but may have
+**execution views** (derived, machine-consumable copies). Views exist because
+`no_agent` scripts cannot resolve references: they cannot run GPG decryption or
+LLM resolution on every tick. The rule that keeps views from drifting:
+
+- **Source of truth (credential store)** — `connection.paths`, addresses, and
+  secrets live here. Edited by humans / LLM agents. This is the layer that
+  `device-ref` resolves against.
+- **Execution view (e.g. `astra-sre/config/devices.yaml`)** — plaintext copy
+  consumed by scheduled `no_agent` scripts (`health-scan.py`). It MUST carry a
+  header comment declaring it DERIVED from the credential store, so a reader
+  knows it is a cache, not a source. Re-sync it after credential-store changes
+  (or treat drift as a known, accepted cost for read-only scan inputs).
+- **Reference (agent registry)** — `device-ref` pointers, never the values.
+
 ## Consumers
 
 | Component | Where the protocol applies |
 |:----------|:---------------------------|
 | `astra-agent-constellation` | Agent registry schema (`templates/agent-registry/registry.yaml.example`) and its validation gate (`scripts/registry-check.py`) |
 | `credential-store-management` | `device-ref` resolution against `connection.paths` (multi-path priority) |
-| `astra-sre` | `devices.yaml` — machine layer source of truth referenced by `device-ref` |
+| `astra-sre` | `devices.yaml` — execution view of the credential store for `no_agent` scans (DERIVED, see Two-Source Model above) |
 
 ## Document Status
 
@@ -64,3 +81,8 @@ This document is the authoritative source for the reference protocol.
 Component documentation (e.g. the agent registry chapter of
 `astra-agent-constellation`) may summarise it and link here, but must not
 fork the field semantics.
+
+**2026-08-04** — Added Two-Source Model (source of truth vs execution view):
+`astra-sre/config/devices.yaml` clarified as a DERIVED execution view of the
+credential store for `no_agent` scans, resolving a contradiction where the
+same fact had two claimed sources.
