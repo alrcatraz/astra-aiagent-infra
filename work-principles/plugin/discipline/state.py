@@ -94,6 +94,9 @@ def default_state() -> dict:
         "research_activity_this_turn": False,
         # Tool-triggered auto-loaded skill — injected next pre_llm_call
         "auto_loaded_skill": None,
+        # Suspended-task stack: [{phase, reason, at}, ...] — a branch task
+        # pushed the main task here; CLOSING "done" pops back to it.
+        "suspended": [],
     }
 
 
@@ -243,4 +246,65 @@ def clear_closure_bypass(session_id: str | None = None) -> None:
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         state["closure_bypass_warning"] = False
+        _write(state, session_id)
+
+
+# ── Suspended-task stack helpers ───────────────────────────────────────
+
+def push_suspended(phase: str, reason: str | None = None,
+                   session_id: str | None = None) -> dict:
+    """Push the current task context onto the suspended stack.
+
+    Used when a branch task interrupts the main task: the main task's
+    phase is parked here so CLOSING 'done' can pop back to it.
+    """
+    with _lock:
+        state = default_state()
+        path = _state_path(session_id)
+        try:
+            existing = json.load(open(path))
+            state.update(existing)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        stack = list(state.get("suspended") or [])
+        stack.append({
+            "phase": phase,
+            "reason": reason,
+            "at": datetime.now().isoformat(),
+        })
+        state["suspended"] = stack
+        _write(state, session_id)
+    return state
+
+
+def pop_suspended(session_id: str | None = None) -> dict | None:
+    """Pop the most recently suspended task context (or None)."""
+    with _lock:
+        state = default_state()
+        path = _state_path(session_id)
+        try:
+            existing = json.load(open(path))
+            state.update(existing)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+        stack = list(state.get("suspended") or [])
+        if not stack:
+            return None
+        entry = stack.pop()
+        state["suspended"] = stack
+        _write(state, session_id)
+    return entry
+
+
+def clear_suspended(session_id: str | None = None) -> None:
+    """Drop all suspended task contexts (casual marker / explicit reset)."""
+    with _lock:
+        state = default_state()
+        path = _state_path(session_id)
+        try:
+            existing = json.load(open(path))
+            state.update(existing)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        state["suspended"] = []
         _write(state, session_id)
