@@ -46,6 +46,9 @@ from .state import (
     set_auto_loaded_skill,
     set_closure_bypass,
     clear_closure_bypass,
+    push_suspended,
+    pop_suspended,
+    clear_suspended,
 )
 
 logger = logging.getLogger("work-principles")
@@ -396,20 +399,23 @@ _MESSAGE_TEMPLATES: dict[Phase, str | None] = {
         "Complete modifications before leaving this phase."
     ),
     Phase.CLOSING: (
-        "⚙ Discipline: phase=closing\n"
-        "You MUST run the full closure checklist before finishing:\n"
-        "  ⓪ System-config backup & credential leak scan\n"
-        "  ① Skill update check\n"
-        "  ② Decision record\n"
-        "  ③ Service/device registration\n"
-        "  ④ Information storage audit\n"
-        "  ⑤ Environment baseline comparison\n"
-        "  ⑥ Git commit housekeeping\n"
-        "\n"
-        "The CLOSING phase cannot be bypassed.  You must include\n"
-        "[HARNESS: done] in your final response to exit this phase.\n"
-        "Other [HARNESS:] markers (task_started/plan/casual) are\n"
-        "rejected while in CLOSING."
+        "⚙ Discipline: phase=closing\\n"
+        "Run the closure checklist before moving on:\\n"
+        "  ⓪ System-config backup & credential leak scan\\n"
+        "  ① Skill update check\\n"
+        "  ② Decision record\\n"
+        "  ③ Service/device registration\\n"
+        "  ④ Information storage audit\\n"
+        "  ⑤ Environment baseline comparison\\n"
+        "  ⑥ Git commit housekeeping\\n"
+        "\\n"
+        "CLOSING is a checkpoint, not a dead end.  After the checklist:\\n"
+        "  - [HARNESS: done]        → confirm closure: archive (or resume\\n"
+        "                             a suspended task, if any)\\n"
+        "  - [HARNESS: plan]        → continue to the next planning phase\\n"
+        "  - [HARNESS: task_started]→ start a new task\\n"
+        "  - [HARNESS: casual]      → back to idle\\n"
+        "Include the chosen marker in your final response."
     ),
 }
 
@@ -713,27 +719,70 @@ def _handle_harness_marker(marker: str,
                             session_id: str | None = None) -> None:
     """Process a [HARNESS:] marker and transition phase accordingly.
 
-    If currently in CLOSING phase and the marker is not 'done', this
-    is treated as an attempt to bypass closure — the warning flag is
-    set so pre_llm_call can inject a reminder on the next turn.
-    """
-    # Detect closure bypass: in CLOSING, only [HARNESS: done] is valid
-    if current == Phase.CLOSING and marker != "done":
-        set_closure_bypass(session_id)
-        logger.info("closure bypass attempty → marker=%s (still in %s)",
-                     marker, current.value)
-        return
+    CLOSING is a checkpoint, not a dead end:
+      - 'done' (second time)   → confirm closure: pop a suspended task
+        and resume it, or archive to NO_TASK if nothing is suspended.
+      - 'plan' / 'task_started' → closure approved, continue work
+        (next planning phase / new task).
+      - 'casual'               → back to idle, drop suspended stack.
 
+    Outside CLOSING, 'task_started' / 'plan' arriving mid-work suspend
+    the current phase (branch-task support); the suspended context is
+    restored by the next 'done' confirmation.
+    """
     if marker == "task_started":
+        # Branch-task support: mid-work task_started parks the current phase.
+        # CLOSING is exempt — leaving closure to start a new task is a
+        # continuation, not an interruption.
+        if current not in (Phase.NO_TASK, Phase.TASK_STARTED, Phase.CLOSING):
+            st = get(session_id)
+            push_suspended(current.value,
+                           reason=st.get("last_reason"),
+                           session_id=session_id)
+            logger.info("suspend %s for branch task", current.value)
         set_phase(Phase.TASK_STARTED, "harness: task_started marker", session_id)
         set_research_detected(session_id)
-    elif marker == "plan":
+        return
+
+    if marker == "plan":
+        # Branch-task support: mid-work plan parks the current phase.
+        # CLOSING is exempt — leaving closure to plan the next phase is a
+        # continuation, not an interruption.
+        if current not in (Phase.NO_TASK, Phase.TASK_STARTED, Phase.PLANNING,
+                           Phase.CLOSING):
+            st = get(session_id)
+            push_suspended(current.value,
+                           reason=st.get("last_reason"),
+                           session_id=session_id)
+            logger.info("suspend %s for planning branch", current.value)
         set_phase(Phase.PLANNING, "harness: plan marker", session_id)
         clear_research_detected(session_id)
-    elif marker == "casual":
+        return
+
+    if marker == "casual":
+        clear_suspended(session_id)
         reset(session_id)
-    elif marker == "done":
-        set_phase(Phase.CLOSING, "harness: done marker", session_id)
+        return
+
+    if marker == "done":
+        if current == Phase.CLOSING:
+            # Confirmation of closure: resume a suspended task if any.
+            entry = pop_suspended(session_id)
+            if entry:
+                try:
+                    resume = Phase(entry.get("phase"))
+                except ValueError:
+                    resume = Phase.NO_TASK
+                set_phase(resume, "resumed suspended task after closure",
+                          session_id)
+                logger.info("closure done → resumed %s", resume.value)
+            else:
+                set_phase(Phase.NO_TASK, "harness: done (closure confirmed)",
+                          session_id)
+        else:
+            set_phase(Phase.CLOSING, "harness: done marker", session_id)
+        return
+
     logger.info("harness marker→%s (phase=%s)", marker, current.value)
 
 
