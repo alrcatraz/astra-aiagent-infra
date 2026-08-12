@@ -57,8 +57,9 @@ triggers:
                                │ task done
                     ┌──────────▼───────────┐
                     │   closing             │
-                    │   Closure Gate        │ 🔒 仅 [HARNESS: done] 可退
+                    │   Closure Gate        │ 🔒 检查点非死胡同
                     │                       │ 📋 7 步 checklist 注入
+                    │                       │ → done/plan/task_started/casual 可退
                     └──────────────────────┘
 ```
 
@@ -97,13 +98,22 @@ Same applies to `[HARNESS: task_started]`, `[HARNESS: casual]`,
 
 | Marker | Meaning | Phase transition |
 |:-------|:--------|:----------------|
-| `[HARNESS: task_started]` | This is a real task | Enter task_started + activate Research Gate |
-| `[HARNESS: plan]` | Research done, here is my plan | Enter planning + clear Research Gate |
-| `[HARNESS: casual]` | Just chatting | Reset to no_task |
-| `[HARNESS: done]` | Closure complete | Enter closing (only way to exit closing) |
+| `[HARNESS: task_started]` | This is a real task | Enter task_started + activate Research Gate. If mid-work (executing/modifying/planning…), the current phase is **suspended** (branch-task support) and resumed after closure. |
+| `[HARNESS: plan]` | Research done, here is my plan | Enter planning + clear Research Gate. Mid-work plan also suspends the current phase. |
+| `[HARNESS: casual]` | Just chatting | Reset to no_task, drop suspended stack |
+| `[HARNESS: done]` | Task complete | Enter closing (checkpoint). A second `done` **confirms closure**: resume the suspended task (if any) or archive to no_task. |
 
-In CLOSING phase, only `[HARNESS: done]` is accepted — other markers are
-rejected and trigger a bypass warning.
+**CLOSING is a checkpoint, not a dead end.** After running the closure
+checklist, all four markers are legal exits:
+- `[HARNESS: done]` → confirm closure → resume suspended task / archive
+- `[HARNESS: plan]` → continue to next planning phase
+- `[HARNESS: task_started]` → start a new task
+- `[HARNESS: casual]` → back to idle
+
+**Branch tasks**: a `task_started`/`plan` marker arriving mid-work (e.g.
+while executing) pushes the current phase onto a `suspended` stack; the
+next `done` confirmation pops it and resumes the main task. `casual`
+drops the stack.
 
 ### Session isolation
 

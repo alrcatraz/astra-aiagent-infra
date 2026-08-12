@@ -97,16 +97,52 @@ def main() -> int:
     r = H.on_pre_tool_call("execute_code", {"code": "print(1)"}, session_id=sid)
     check("closing: execute_code blocked", r is not None and r.get("action") == "block", str(r))
 
-    # 1.8 closing + non-done marker → bypass warning, stays closing
-    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: plan] 再来一次")
+    # 1.8 CLOSING is a checkpoint: plan marker → continue to planning
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: plan] 下一阶段")
     st = S.get(sid)
-    check("closing: plan marker rejected (stays closing)", st["phase"] == "closing", st["phase"])
-    check("closing: bypass warning set", st["closure_bypass_warning"] is True)
+    check("closing: plan → planning", st["phase"] == "planning", st["phase"])
+    check("closing: plan clears research gate", st["research_detected"] is False)
 
-    # 1.9 done marker in closing → still closing (idempotent), warning cleared via set_phase
+    # 1.9 done → closing again; then done confirms → archive to no_task
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: done]")
+    check("closing re-entered", S.get(sid)["phase"] == "closing")
+    H.on_post_llm_call(session_id=sid, assistant_response="收尾完成 [HARNESS: done]")
+    st = S.get(sid)
+    check("closing: done confirms → no_task", st["phase"] == "no_task", st["phase"])
+
+    # 1.10 closing → task_started (new task) and → casual (idle)
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: done]")
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: task_started] 新任务")
+    check("closing: task_started → new task", S.get(sid)["phase"] == "task_started")
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: done]")
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: casual]")
+    st = S.get(sid)
+    check("closing: casual → idle", st["phase"] == "no_task", st["phase"])
+
+    # 1.11 branch task: mid-executing task_started suspends main task
+    fresh_session(sid)
+    S.set_phase(S.Phase.EXECUTING, "main task in progress", sid)
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: task_started] 分支来了")
+    st = S.get(sid)
+    check("branch: main task suspended", st["phase"] == "task_started", st["phase"])
+    check("branch: suspended stack has executing",
+          st["suspended"] and st["suspended"][-1]["phase"] == "executing",
+          str(st.get("suspended")))
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: done]")
+    check("branch: closing after done", S.get(sid)["phase"] == "closing")
     H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: done]")
     st = S.get(sid)
-    check("closing: done keeps closing", st["phase"] == "closing", st["phase"])
+    check("branch: done confirms → resumed executing", st["phase"] == "executing", st["phase"])
+    check("branch: suspended stack drained", not st.get("suspended"), str(st.get("suspended")))
+
+    # 1.12 casual drops suspended stack
+    S.set_phase(S.Phase.EXECUTING, "main task again", sid)
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: task_started] 分支2")
+    check("branch2: suspended", bool(S.get(sid).get("suspended")))
+    H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: casual]")
+    st = S.get(sid)
+    check("casual: idle + stack dropped",
+          st["phase"] == "no_task" and not st.get("suspended"), str(st))
 
     print("== 2. Session isolation ==")
     sid_a, sid_b = "itest-A", "itest-B"
