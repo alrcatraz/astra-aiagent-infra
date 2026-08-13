@@ -51,7 +51,7 @@ triggers:
                     ┌──────────▼───────────┐
                     │   modifying           │
                     │   Modify Gate         │ 🔒 change-safeguard
-                    │                       │ 🪧 skill-creator 提醒
+                    │                       │ 🪧 skill-ecosystem 提醒
                     │                       │ 🪧 credential 提醒
                     └──────────┬───────────┘
                                │ task done
@@ -128,7 +128,7 @@ used for isolation.
 | Agent uses... | Auto-loads... |
 |:--------------|:--------------|
 | `browser_navigate` / `browser_click` | `camofox-browser` |
-| `skill_manage(create/edit/patch)` | `skill-creator` |
+| `skill_manage(create/edit/patch)` | `skill-ecosystem` |
 | terminal(gpg/password-store/keepass) | `credential-store-management` |
 | SSH command | Auto-transition to `accessing_device` + credential reminder |
 
@@ -156,7 +156,7 @@ allowed.
 | `change-safeguard` | Pre-change backup checklist | Modify Gate suggests loading it |
 | `work-closure-check` | Closure checklist (7 steps) | Closure Gate injects its content |
 | `credential-store-management` | GPG/Keepass credential access | Tool-triggered auto-load |
-| `skill-creator` | Frontmatter validation | Tool-triggered auto-load |
+| `skill-ecosystem` | Frontmatter validation | Tool-triggered auto-load |
 | `camofox-browser` | VNC/anti-detection browser | Tool-triggered auto-load |
 | `execution-framework` | Manual recommendation tool | Optional, no longer required |
 

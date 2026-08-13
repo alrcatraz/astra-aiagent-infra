@@ -11,7 +11,7 @@ pre_tool_call
 
 post_tool_call
   - Auto-detects write/patch in EXECUTING → auto-transition to MODIFYING
-  - Tool-Trigger auto-skill loading (browser→camofox, skill_manage→skill-creator, etc.)
+  - Tool-Trigger auto-skill loading (browser→camofox, skill_manage→skill-ecosystem, etc.)
 
 post_llm_call
   - Detects [HARNESS:] markers in the assistant's final response and
@@ -584,7 +584,7 @@ def on_pre_llm_call(*args, **kwargs):
         msg += (
             "\n\n🛠 Skill management reminder: you just used "
             f"skill_manage(action='{_sm_pending}').\n"
-            "Load the 'skill-creator' skill (skill_view('skill-creator')) to "
+            "Load the 'skill-ecosystem' skill (skill_view('skill-ecosystem')) to "
             "ensure frontmatter is complete."
         )
         state["skill_manage_pending"] = None
@@ -680,9 +680,9 @@ def on_post_tool_call(tool_name: str, args: dict | None = None,
             state["skill_manage_pending"] = action
             from .state import _write as _write_state
             _write_state(state, sid)
-            # Also auto-load skill-creator
-            set_auto_loaded_skill("skill-creator", sid)
-            logger.info("auto-skill→skill-creator via skill_manage(%s)", action)
+            # Also auto-load skill-ecosystem
+            set_auto_loaded_skill("skill-ecosystem", sid)
+            logger.info("auto-skill→skill-ecosystem via skill_manage(%s)", action)
 
     # ── Research/exploration tools → auto TASK_STARTED (from NO_TASK) ──
     if current == Phase.NO_TASK and tool_name in (
