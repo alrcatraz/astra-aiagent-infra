@@ -233,6 +233,11 @@ def main() -> int:
     check("browser→camofox-browser", S.get(sid)["auto_loaded_skill"] == "camofox-browser",
           str(S.get(sid)["auto_loaded_skill"]))
     fresh_session(sid)
+    H.on_post_tool_call("skill_manage", {"action": "create", "name": "test"}, session_id=sid)
+    check("skill_manage create→skill-ecosystem",
+          S.get(sid)["auto_loaded_skill"] == "skill-ecosystem",
+          str(S.get(sid)["auto_loaded_skill"]))
+    fresh_session(sid)
     H.on_post_tool_call("terminal", {"command": "keepassxc-cli open db"}, session_id=sid)
     check("keepass→credential-store-management",
           S.get(sid)["auto_loaded_skill"] == "credential-store-management",
