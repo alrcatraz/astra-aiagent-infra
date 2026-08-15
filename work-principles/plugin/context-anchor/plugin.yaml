@@ -1,6 +1,6 @@
 name: context-anchor
-version: 2.1.0
-description: Automatically maintain and inject [AGENT CONTEXT] state across sessions
+version: 2.2.0
+description: Automatically maintain and inject [AGENT CONTEXT] state across sessions, plus static drop-in injection from ~/.hermes/inject.d
 provides_tools: []
 provides_hooks:
   - pre_llm_call
