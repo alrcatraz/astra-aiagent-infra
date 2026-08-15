@@ -125,6 +125,59 @@ def _build_anchor_block(state: dict) -> str:
     return "\n".join(lines)
 
 
+# ── Static drop-in injection (Linux-style inject.d) ───────────────
+
+
+def _read_inject_dir() -> str:
+    """Read static drop-in files from the inject directory.
+
+    Mirrors the Linux /etc/profile.d / systemd drop-in pattern: every
+    *.md file in the directory is concatenated in filename-sorted order
+    and appended after the [CONTEXT ANCHOR] block on every LLM call.
+
+    Directory resolution (first match wins):
+      1. $CONTEXT_ANCHOR_INJECT_DIR env var (explicit override)
+      2. ~/.hermes/inject.d/ (default)
+
+    Per-file failures (missing, unreadable, empty, malformed UTF-8)
+    are skipped individually — the rest still injects. No exceptions
+    propagate to the hook caller (safe degradation, same as the rest
+    of this plugin).
+
+    Content ownership is intentionally OUTSIDE the plugin repo: drop-in
+    files live in the Hermes home, so operators can add or remove
+    always-on injection without touching plugin code.
+    """
+    import os
+    import pathlib
+
+    env_dir = os.environ.get("CONTEXT_ANCHOR_INJECT_DIR", "").strip()
+    inject_dir = pathlib.Path(env_dir) if env_dir else pathlib.Path.home() / ".hermes" / "inject.d"
+
+    if not inject_dir.is_dir():
+        return ""
+
+    try:
+        files = sorted(inject_dir.glob("*.md"))
+    except OSError:
+        return ""
+
+    sections = []
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not text:
+            continue
+        # Normalise: strip one trailing newline set, keep leading content intact
+        sections.append(text)
+
+    if not sections:
+        return ""
+    return "\n\n" + "\n\n---\n\n".join(sections) + "\n"
+
+
 # ── Tool call summariser ───────────────────────────────────────────
 
 
@@ -159,11 +212,15 @@ def on_pre_llm_call(*args, **kwargs) -> str:
 
     Attempts to read session_id from kwargs. Falls back to empty
     template if unavailable (safe — no crash, just no saved context).
+
+    Static drop-in files from ~/.hermes/inject.d/*.md are appended
+    after the anchor block (see _read_inject_dir for semantics).
     """
     session_id = kwargs.get("session_id") or kwargs.get("session", "")
     state = get_state(session_id) if session_id else get_state(None)
     block = _build_anchor_block(state)
     header = f"\n\n{block}\n"
+    header += _read_inject_dir()
     if args:
         return args[0] + header
     return (kwargs.get("system_prompt", "") or "") + header
