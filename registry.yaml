@@ -142,6 +142,24 @@ components:
 
   # ── VCS Workflow ──────────────────────────────────────────
   - type: skill
+    name: family-multiagent-deployment
+    repo: alrcatraz/astra-agent-constellation   # knowledge home; normative playbook in blueprint §12.12.4
+    local_path: ~/.hermes/skills/devops/family-multiagent-deployment/   # HC01-local only (family machine names)
+    version: 1.1.0+alrcatraz.0.0.0.angelia.1.0.0
+    description: >
+      Father-side multi-agent fleet operations — NUC10/WSL deployment, ANP/A2A
+      external-interop endpoints, one-shot delegation mandates, AI Gate/DSH/
+      Camofox provisioning. References carry the remote-delegation playbook
+      (session gates, acceptance probes, payload chunking) and codeload/proxy
+      channel history.
+    status: active
+    depends_on:
+      - repo: alrcatraz/astra-agent-constellation
+        resource: docs/12-cross-agent-collab.md §12.12 (dispatch bridge + §12.12.4 delegation playbook)
+        required: recommended
+        reason: Normative wording of the remote-delegation rules this skill applies operationally
+
+  - type: skill
     name: astra-vcs-assist
     repo: alrcatraz/astra-vcs-assist
     version: 1.0.0
