@@ -67,10 +67,16 @@ triggers:
 
 | Level | Behaviour | Applied to |
 |:------|:----------|:-----------|
-| 🔒 Hard lock | Tool blocked until phase/release condition met | Research Gate, Modify Gate, Closure Gate |
-| 👥 Social | Not code-blocked — user approval required | Proposal Gate (wait for "可以"/"开干") |
+| 🔒 Hard lock | Tool blocked until phase/release condition met | Modify Gate, Closure Gate, Research Gate (mutation-only — "reach, don't enter") |
+| 👥 Social | Not code-blocked — user approval required | Proposal Gate (wait for "可以"/"开干") — **the primary gate of the whole flow** |
 | 🪧 Reminder | Context injected, no blocking | Executing phase reminders |
 | 📋 Checklist | Complete checklist injected, must acknowledge | Closure checklist |
+
+**Design principle (reaffirmed 2026-09-18):** code locks are a last resort.
+The research gate blocks only *state-changing* tools while a plan is pending;
+any investigation tool or read-only command passes freely. The old whitelist
+model frisked every call and produced dead-ends whose only exit was falsely
+claiming `[HARNESS: plan]`.
 
 ### [HARNESS:] marker system
 
@@ -147,6 +153,15 @@ git status, git log, git diff, nvidia-smi, ...
 Additionally, `git/docker/podman/systemctl` subcommands are filtered:
 `git push/commit/merge/reset` are blocked; `git status/log/diff` are
 allowed.
+
+## Progress reporting cadence (hard rule)
+
+用户两次纠正（2026-08「是你一次次停下来」与 2026-09「你一直不和我报告进展」）合并为一条纪律：
+
+- **执行中每 3–4 个工具调用，必须输出一句进度旁白**（刚做完什么 + 接下来做什么），即使该轮仍在调用工具。纯工具沉默超过 4 个连续调用 = 违规。
+- 卡点/失败要**当轮主动说**，不要攒到收尾；被审批拦截的命令立刻讲清在等什么。
+- 但**不要为汇报而停下**——旁白之后继续干活，持续到完成或真正的决策点才停等用户。
+- 用户问「怎么样了 / 这是什么意思」时，当轮先答人话汇报再继续其它动作。
 
 ## Related Skills
 
