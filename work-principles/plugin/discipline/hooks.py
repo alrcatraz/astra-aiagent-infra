@@ -439,6 +439,14 @@ _TOOL_TRIGGER_SKILLS: dict[str, str] = {
 # Regex patterns for terminal commands → auto-load skill
 _TERMINAL_TRIGGER_SKILLS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'(keepass|keepassxc|gpg\s*--decrypt|password-store)'), "credential-store-management"),
+    # Symptom-based: auth failures mean a credential is about to be needed —
+    # surface the store protocol BEFORE the agent improvises.
+    (re.compile(r'(Permission denied \(publickey\)|authentication fail'
+                r'|sudo: [13] incorrect password attempts|403 \[denied'
+                r'|HTTP/1\.1 403|unauthorized)'), "credential-store-management"),
+    # Credentials embedded in URLs (git remotes, API endpoints) — route them
+    # to the proper store instead of leaving secrets in .git/config.
+    (re.compile(r'[a-z]+://[^/\s:@]+:[^@\s]+@'), "credential-store-management"),
 ]
 
 # Tool name + action → auto-load skill
@@ -511,8 +519,10 @@ _MESSAGE_TEMPLATES: dict[Phase, str | None] = {
     ),
     Phase.ACCESSING_DEVICE: (
         "⚙ Discipline: phase=accessing_device  (prev: {previous})\n"
-        "Check GPG credential store before asking the user. "
-        "If new credentials obtained, save them."
+        "Check the credential store FIRST — load skill_view("
+        "'credential-store-management') for the three-layer lookup protocol "
+        "(KeePassXC / GPG YAML / .env). Never guess or fabricate credentials. "
+        "If new credentials are obtained, save them back per that skill."
     ),
     Phase.EXECUTING: (
         "⚙ Discipline: phase=executing\n"
