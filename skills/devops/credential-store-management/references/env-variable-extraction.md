@@ -9,19 +9,19 @@ state) and never `read_file` (it dumps the entire content to context).
 ### Simple Value (no quotes)
 
 ```bash
-grep '^export KEY=' ~/.hermes/.env | cut -d= -f2-
+grep '^KEY=' ~/.hermes/.env | cut -d= -f2-
 ```
 
 ### Single-quoted Value
 
 ```bash
-grep '^export KEY=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//"
+grep '^KEY=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//"
 ```
 
 ### Full Variable Extraction on One Line (quotes safe)
 
 ```bash
-PW=$(grep '^export SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+PW=$(grep '^SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 ```
 
 ## Bootstrap Credential Lookup Chain
