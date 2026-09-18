@@ -33,7 +33,7 @@ Need credential
   │
   ├─ Layer 1: Bootstrap secrets (.env)
   │   └─ GPG passphrase, KeePass master password, sudo password (local)
-  │   └─ ~/.hermes/.env  (export KEY='value' format)
+  │   └─ ~/.hermes/.env  (bare KEY=value lines, NO export prefix — grep '^KEY='; an '^export KEY=' grep silently returns empty)
   │
   ├─ Layer 2: Device credentials (GPG YAML)
   │   ├─ ~/Documents/credentials/personal-credentials.yaml.gpg
@@ -50,13 +50,13 @@ Use `grep` to read specific variables (never `source` the file, never `read_file
 
 ```bash
 # GPG passphrase (to decrypt Layer 2)
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 
 # KeePass master password (to unlock Layer 3)
-KP_PASS=$(grep '^export KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+KP_PASS=$(grep '^KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 
 # Local sudo password (fallback — see Practical Workflow below)
-SUDO_PASS=$(grep '^export SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+SUDO_PASS=$(grep '^SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 ```
 
 **Key invariant:** .env contains only the minimal bootstrap secrets to unlock the other two layers. All device-specific secrets live in GPG-encrypted YAML.
@@ -70,7 +70,7 @@ SUDO_PASS=$(grep '^export SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s
 The same GPG file also stores service-level credentials. Extract with `python3 -c`:
 
 ```bash
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 
 # Gitea PAT
 echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
@@ -122,7 +122,7 @@ Each device has:
 ### Decrypt a device entry
 
 ```bash
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
   --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
   | grep -A10 "  <device-key>:"
@@ -131,7 +131,7 @@ echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopba
 ### Full decrypt (for editing)
 
 ```bash
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
   --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
   > /tmp/creds-decrypted.yaml
@@ -146,7 +146,7 @@ rm -f /tmp/creds-decrypted.yaml
 ## Layer 3: Service Accounts (KeePassXC)
 
 ```bash
-KP_PASS=$(grep '^export KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+KP_PASS=$(grep '^KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 echo "$KP_PASS" | keepassxc-cli search ~/Documents/KeePassXC/Combined.kdbx "<keyword>"
 echo "$KP_PASS" | keepassxc-cli show -s ~/Documents/KeePassXC/Combined.kdbx "<entry-path>"
 ```
@@ -164,7 +164,7 @@ resident workstation, a storage NAS, a router, a GPU server, etc. — actual key
 live in the GPG credential store, not in this skill.
 
 ```bash
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 DEVICE_PASS=$(echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
   --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
   | python3 -c "

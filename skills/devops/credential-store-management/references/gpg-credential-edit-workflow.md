@@ -4,7 +4,7 @@
 
 - GPG passphrase from `~/.hermes/.env`:
   ```bash
-  grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f3- | sed "s/^'//;s/'$//"
+  grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//"
   ```
 - The `.gpg` file path (e.g. `~/Documents/credentials/personal-credentials.yaml.gpg`)
 - The index README at `~/Documents/credentials/README.md` — update this too
@@ -14,7 +14,7 @@
 ### Step 1: Decrypt
 
 ```bash
-GPG_PASS=$(grep '^export GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f3- | sed "s/^'//;s/'$//")
+GPG_PASS=$(grep '^GPG_Key_Alrcatraz=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
 echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
   --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null > /tmp/creds-decrypted.yaml
 ```
