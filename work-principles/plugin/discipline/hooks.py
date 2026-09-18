@@ -179,18 +179,139 @@ _RESEARCH_TOOLS = frozenset({
     "discipline_set_phase",
     "clarify",
     "text_to_speech",
+    # Sandboxed analysis/orchestration tools.  execute_code's inner
+    # hermes_tools calls still pass through pre_tool_call (defence in
+    # depth preserved); delegate_task spawns children under the same
+    # hook chain.  Blocking these during research only produced
+    # heredoc-python3 workarounds that bypassed the gate anyway.
+    "execute_code", "delegate_task",
+    "tool_search", "tool_describe",
 })
 
 # Tools that modify files — blocked unless in an allowed phase
 _MODIFYING_TOOLS = frozenset({"write_file", "patch"})
 
 # Phases where modifying tools are permitted
-_MODIFY_ALLOWED = {Phase.MODIFYING, Phase.PLANNING, Phase.CLOSING}
+_MODIFY_ALLOWED = {Phase.MODIFYING, Phase.PLANNING, Phase.CLOSING,
+                   # accessing_device is a work phase: writing local config /
+                   # scripts while operating a remote device is routine and
+                   # was the single biggest false-block source (770 events).
+                   Phase.ACCESSING_DEVICE}
 
-# Phases where remote access is permitted
+# Phases where remote access is permitted outright
 _SSH_ALLOWED = {Phase.ACCESSING_DEVICE}
 
+# Phases where READ-ONLY remote commands are permitted (see _is_read_only_remote).
+# Writing to a remote device still requires explicitly declaring
+# accessing_device — the red line stays; only inspection is unblocked.
+_SSH_READONLY_ALLOWED = {Phase.MODIFYING, Phase.PLANNING, Phase.CLOSING}
+
 _SSH_RE = re.compile(r"(^|\s)(ssh|scp|rsync|sftp|telnet|mosh)(\s|$)")
+
+# ssh/scp/sftp flags that take a separate argument token (skip flag + value
+# when hunting for the host operand).  Everything else starting with '-' is
+# treated as a standalone flag (-p PORT, -o Opt=val, -X, --help…).
+_SSH_VALUE_FLAGS = frozenset({
+    "-l", "-i", "-F", "-b", "-c", "-m", "-S", "-P", "-J", "-L", "-R", "-D",
+    "-E", "-e", "-w", "-W", "-Q", "-q", "-o", "-p", "-f", "-B", "-I", "-K",
+})
+
+
+def _is_read_only_remote(command: str) -> bool:
+    """True if an ssh/scp-style command only READS from the remote side.
+
+    Rules (conservative — anything ambiguous returns False):
+      - bare ``ssh host`` (no remote command) is read-only-ish? No → False.
+      - ``ssh host <cmd>``: the remote command must itself pass the local
+        read-only whitelist (_is_read_only_command).
+      - ``scp host:path local`` / ``sftp`` batch pulls (remote source,
+        local destination) are allowed; pushes (local → host:) are not.
+      - ``rsync`` pull (trailing remote dest is local path) allowed, push
+        blocked.  Flags like --delete never appear on pulls we allow here
+        unless the destination is local, which makes them harmless locally.
+    """
+    try:
+        import shlex
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    # strip env-var prefixes (FOO=bar ssh …) and wrappers
+    i = 0
+    while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
+        i += 1
+    if i >= len(tokens):
+        return False
+    base = tokens[i].rsplit("/", 1)[-1]
+    rest = tokens[i + 1:]
+
+    def looks_remote(tok: str) -> bool:
+        # host:path (scp/rsync) or [user@]host form; tolerate IPv6 [::1]:path
+        if tok.startswith("[") and "]" in tok:
+            return True
+        if ":" in tok and not tok.startswith(("/", "./", "../", "~")) \
+                and not tok.startswith("-"):
+            return True
+        return False
+
+    if base == "ssh":
+        j = 0
+        while j < len(rest) and rest[j].startswith("-"):
+            if rest[j][1:] in ("p", "l", "i", "F", "b", "c", "m", "S", "P",
+                               "J", "L", "R", "D", "E", "e", "w", "W", "Q",
+                               "o", "f", "B", "I", "K"):
+                j += 2
+                continue
+            j += 1
+        if j >= len(rest):
+            return False                     # no host operand
+        # everything from host onward is the remote command
+        remote_cmd = rest[j + 1:]
+        if not remote_cmd:
+            return False                     # interactive shell — unknown intent
+        joined = " ".join(remote_cmd)
+        # nested sudo/time strips handled inside _is_read_only_command
+        return _is_read_only_command(joined)
+
+    if base in ("scp", "sftp"):
+        operands = []
+        j = 0
+        while j < len(rest):
+            tok = rest[j]
+            if tok.startswith("-"):
+                if tok[1:] in _SSH_VALUE_FLAGS:
+                    j += 2
+                    continue
+                j += 1
+                continue
+            operands.append(tok)
+            j += 1
+        if len(operands) < 2:
+            return False
+        sources, dest = operands[:-1], operands[-1]
+        # pull: at least one remote source AND a purely local destination
+        if looks_remote(dest):
+            return False                     # push or remote-to-remote
+        return any(looks_remote(s) for s in sources)
+
+    if base == "rsync":
+        operands = []
+        j = 0
+        while j < len(rest):
+            tok = rest[j]
+            if tok.startswith("-"):
+                if tok[1:] in _SSH_VALUE_FLAGS:
+                    j += 2
+                    continue
+                j += 1
+                continue
+            operands.append(tok)
+            j += 1
+        if len(operands) != 2:
+            return False                     # multi-src/multi-dst: be strict
+        src, dst = operands
+        return looks_remote(src) and not looks_remote(dst)
+
+    return False
 
 
 # ── Read-only terminal detection ───────────────────────────────────────
@@ -329,6 +450,10 @@ _CLOSING_TOOLS = frozenset({
     "fact_feedback",
     "clarify",
     "text_to_speech",
+    # closure checklist steps ④/⑤ need scripted stats (log counts, disk
+    # baselines); execute_code is sandboxed and its inner tool calls are
+    # still gated.  tool_call is blocked — it could invoke write tools.
+    "execute_code",
 })
 
 
@@ -492,6 +617,11 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
     if tool_name == "terminal":
         command = (args or {}).get("command", "")
         if current_phase not in _SSH_ALLOWED and _SSH_RE.search(command):
+            # Read-only remote inspection is permitted in work phases —
+            # writing to a remote device still needs accessing_device.
+            if (current_phase in _SSH_READONLY_ALLOWED
+                    and _is_read_only_remote(command)):
+                return None
             cmd_preview = command[:80].replace("\n", "\\n")
             _log_gate_block("ssh", tool_name, current_phase.value,
                             command=command,
