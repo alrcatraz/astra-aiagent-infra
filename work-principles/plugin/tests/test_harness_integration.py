@@ -280,17 +280,30 @@ def main() -> int:
     r = H.on_pre_tool_call("terminal", {"command": "ssh host 'ls'"}, session_id=sid)
     check("no_task: ssh read-only still blocked", r is not None and r.get("action") == "block", str(r))
 
-    # 7.3 research gate permits sandboxed tools, still blocks real writes
+    # 7.3 research gate: "reach, don't enter" — investigation free,
+    # mutation blocked until a plan exists
     fresh_session(sid)
     S.set_phase(S.Phase.TASK_STARTED, "new task", sid)
     S.set_research_detected(sid)
-    for t in ("execute_code", "delegate_task", "tool_search", "tool_describe"):
+    r = H.on_pre_tool_call("execute_code", {"code": "print(1)"}, session_id=sid)
+    check("research: execute_code allowed (investigation)", r is None, str(r))
+    for t in ("tool_search", "tool_describe", "browser_navigate"):
         r = H.on_pre_tool_call(t, {}, session_id=sid)
         check(f"research: {t} allowed", r is None, str(r))
-    r = H.on_pre_tool_call("tool_call", {"calls": []}, session_id=sid)
-    check("research: tool_call blocked", r is not None and r.get("action") == "block", str(r))
     r = H.on_pre_tool_call("terminal", {"command": "git status"}, session_id=sid)
-    check("research: git status still allowed", r is None, str(r))
+    check("research: read-only terminal allowed", r is None, str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "rm -rf /tmp/x"}, session_id=sid)
+    check("research: mutating terminal blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("write_file", {"path": "/tmp/x"}, session_id=sid)
+    check("research: write_file blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("skill_manage", {"action": "create"}, session_id=sid)
+    check("research: skill_manage blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("delegate_task", {"tasks": []}, session_id=sid)
+    check("research: delegate_task blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("process", {"action": "poll", "session_id": "x"}, session_id=sid)
+    check("research: process poll allowed", r is None, str(r))
+    r = H.on_pre_tool_call("process", {"action": "kill", "session_id": "x"}, session_id=sid)
+    check("research: process kill blocked", r is not None and r.get("action") == "block", str(r))
 
     print()
     print(f"RESULT: {PASS} passed, {FAIL} failed")
