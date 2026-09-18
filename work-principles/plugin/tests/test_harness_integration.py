@@ -95,7 +95,7 @@ def main() -> int:
     r = H.on_pre_tool_call("browser_navigate", {"url": "http://x"}, session_id=sid)
     check("closing: browser allowed (research tool)", r is None, str(r))
     r = H.on_pre_tool_call("execute_code", {"code": "print(1)"}, session_id=sid)
-    check("closing: execute_code blocked", r is not None and r.get("action") == "block", str(r))
+    check("closing: execute_code allowed (sandboxed stats tool)", r is None, str(r))
 
     # 1.8 CLOSING is a checkpoint: plan marker → continue to planning
     H.on_post_llm_call(session_id=sid, assistant_response="[HARNESS: plan] 下一阶段")
@@ -242,6 +242,55 @@ def main() -> int:
     check("keepass→credential-store-management",
           S.get(sid)["auto_loaded_skill"] == "credential-store-management",
           str(S.get(sid)["auto_loaded_skill"]))
+
+    print("== 7. Gate relaxations (2026-09-18, data-driven) ==")
+    # 7.1 accessing_device permits local file writes (was 770 false blocks)
+    fresh_session(sid)
+    S.set_phase(S.Phase.ACCESSING_DEVICE, "operating remote box", sid)
+    r = H.on_pre_tool_call("write_file", {"path": "/tmp/x"}, session_id=sid)
+    check("accessing_device: write_file allowed", r is None, str(r))
+
+    # 7.2 read-only remote inspection in modifying/planning/closing
+    S.set_phase(S.Phase.MODIFYING, "local edits", sid)
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host 'tail -n 50 log.txt'"},
+                           session_id=sid)
+    check("modifying: ssh read-only remote allowed", r is None, str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host 'rm -rf /tmp/x'"},
+                           session_id=sid)
+    check("modifying: ssh write remote blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "scp host:/remote/f.png ./local.png"},
+                           session_id=sid)
+    check("modifying: scp pull allowed", r is None, str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "scp ./local.png host:/remote/"},
+                           session_id=sid)
+    check("modifying: scp push blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "rsync -avz host:data/ ./data/"},
+                           session_id=sid)
+    check("modifying: rsync pull allowed", r is None, str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "rsync -avz ./data/ host:data/"},
+                           session_id=sid)
+    check("modifying: rsync push blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "ssh -p 2222 user@box.nb.internal \"ps -eo args | grep '[s]dxl_train'\""},
+                           session_id=sid)
+    check("modifying: ssh -p + quoted ro cmd allowed", r is None, str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host"}, session_id=sid)
+    check("modifying: bare ssh blocked (interactive)", r is not None and r.get("action") == "block", str(r))
+    # no_task must NOT get the read-only pass
+    fresh_session(sid)
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host 'ls'"}, session_id=sid)
+    check("no_task: ssh read-only still blocked", r is not None and r.get("action") == "block", str(r))
+
+    # 7.3 research gate permits sandboxed tools, still blocks real writes
+    fresh_session(sid)
+    S.set_phase(S.Phase.TASK_STARTED, "new task", sid)
+    S.set_research_detected(sid)
+    for t in ("execute_code", "delegate_task", "tool_search", "tool_describe"):
+        r = H.on_pre_tool_call(t, {}, session_id=sid)
+        check(f"research: {t} allowed", r is None, str(r))
+    r = H.on_pre_tool_call("tool_call", {"calls": []}, session_id=sid)
+    check("research: tool_call blocked", r is not None and r.get("action") == "block", str(r))
+    r = H.on_pre_tool_call("terminal", {"command": "git status"}, session_id=sid)
+    check("research: git status still allowed", r is None, str(r))
 
     print()
     print(f"RESULT: {PASS} passed, {FAIL} failed")
