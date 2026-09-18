@@ -161,7 +161,19 @@ _READ_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
     }),
 }
 
-# Tools that are always allowed during research (research tools)
+# Tools that change state — blocked while the research gate is pending
+# ("reach, don't enter": investigation is free, mutation needs a plan).
+_RESEARCH_MUTATING_TOOLS = frozenset({
+    "write_file", "patch", "skill_manage", "memory",
+    "terminal", "execute_code",   # terminal/execute_code judged by command
+    "process",                    # judged by action (poll/log/list are reads)
+    "browser_click", "browser_type", "browser_vault_fill",
+    "browser_vault_save_login", "text_to_speech",
+    "cronjob", "delegate_task", "tool_call",
+    "computer_use",
+})
+
+# Research-phase tool names kept for post_tool_call activity tracking.
 _RESEARCH_TOOLS = frozenset({
     "skill_view", "skills_list",
     "web_search", "web_extract",
@@ -179,13 +191,6 @@ _RESEARCH_TOOLS = frozenset({
     "discipline_set_phase",
     "clarify",
     "text_to_speech",
-    # Sandboxed analysis/orchestration tools.  execute_code's inner
-    # hermes_tools calls still pass through pre_tool_call (defence in
-    # depth preserved); delegate_task spawns children under the same
-    # hook chain.  Blocking these during research only produced
-    # heredoc-python3 workarounds that bypassed the gate anyway.
-    "execute_code", "delegate_task",
-    "tool_search", "tool_describe",
 })
 
 # Tools that modify files — blocked unless in an allowed phase
@@ -557,46 +562,47 @@ def on_pre_tool_call(tool_name: str, args: dict | None = None, **kwargs):
     except ValueError:
         return None
 
-    # ── Research gate enforcement ──
+    # ── Research gate: "reach, don't enter" enforcement ──
+    # While research is pending we do NOT frisk every tool call (the old
+    # whitelist model blocked legitimate investigation and produced
+    # dead-ends where the only exit was falsely claiming [HARNESS: plan]).
+    # Instead: state-changing tools are blocked until the agent submits a
+    # plan; pure investigation tools pass freely.  The user's approval at
+    # planning remains the primary gate — this only prevents skipping
+    # straight to mutation without ever proposing anything.
     research_active = state.get("research_detected", False)
     if research_active:
-        # Research tools always allowed
-        if tool_name in _RESEARCH_TOOLS:
-            return None
-
-        # Terminal: allow only read-only commands
+        mutating = tool_name in _RESEARCH_MUTATING_TOOLS
         if tool_name == "terminal":
             command = (args or {}).get("command", "")
-            if _is_read_only_command(command):
-                return None
+            mutating = not _is_read_only_command(command)
+        elif tool_name == "execute_code":
+            # Read-only analysis scripts are investigation, not mutation.
+            # A script only mutates state if it calls a side-effecting
+            # hermes_tool (terminal/write_file/patch) or open(...,"w").
+            code = str((args or {}).get("code", ""))
+            mutating = any(w in code for w in (
+                "terminal(", "write_file(", "patch(", '"w")', "'w')",
+                '"a")', "'a')"))
+        elif tool_name == "process":
+            action = str((args or {}).get("action", ""))
+            mutating = action not in ("poll", "log", "list", "wait", "read")
+        if mutating:
             _log_gate_block("research", tool_name,
                             current_phase.value,
-                            command=command,
-                            reason="non-readonly terminal during research",
+                            command=str((args or {}).get("command", "")),
+                            reason="state change while research pending",
                             session_id=sid)
             return {
                 "action": "block",
                 "message": (
-                    "[work-principles] Research gate: only read-only terminal "
-                    "commands are permitted during research. "
-                    f"Command blocked: {command[:80]}"
+                    f"[work-principles] Research gate: {tool_name} would "
+                    "change state before any plan exists. Investigate "
+                    "freely (any read-only tool/command), then include "
+                    "[HARNESS: plan] with your proposal to proceed."
                 ),
             }
-
-        # All other tools blocked during research unless in whitelist
-        _log_gate_block("research", tool_name,
-                        current_phase.value,
-                        reason="non-research tool during research",
-                        session_id=sid)
-        return {
-            "action": "block",
-            "message": (
-                f"[work-principles] Research gate: {tool_name} requires "
-                "research to be completed first. "
-                "Use research tools (skill_view, web_search, read-only "
-                "terminal, etc.) and then include [HARNESS: plan] to proceed."
-            ),
-        }
+        return None
 
     # ── Block modifying tools in disallowed phases ──
     if tool_name in _MODIFYING_TOOLS and current_phase not in _MODIFY_ALLOWED:
@@ -778,7 +784,8 @@ def on_post_tool_call(tool_name: str, args: dict | None = None,
 
     # ── Research gate: track research activity ──
     research_active = state.get("research_detected", False)
-    if research_active and tool_name in _RESEARCH_TOOLS:
+    if research_active and (tool_name in _RESEARCH_TOOLS
+                            or tool_name == "execute_code"):
         set_research_activity(sid)
 
     # ── Auto-detect modifying from write_file/patch ──
