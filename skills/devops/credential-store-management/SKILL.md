@@ -1,26 +1,82 @@
 ---
 name: credential-store-management
-description: "Three-layer credential store management — GPG-encrypted YAML for device credentials, KeePassXC for service accounts, .env for bootstrap secrets. Exhaustive search protocol and credential lifecycle workflows."
+description: "Load BEFORE any task that authenticates to a device/service — reading, saving, or rotating passwords, tokens, keys. KeePassXC / GPG YAML / .env three stores, lookup order, save protocol, symptom triggers (403, auth fail)."
 category: devops
-version: 1.2.0
+version: 1.3.0+alrcatraz.0.0.0
 author: alrcatraz
 metadata:
   hermes:
     tags: [credentials, encryption, secrets-management, gpg, password-store]
 triggers:
-  - "need sudo password"
-  - "credential lookup"
-  - "find password for device"
   - "GPG credential"
   - "Keepass query"
+  - "Permission denied (publickey)"
+  - "SSH login for [machine]"
+  - "authentication failed"
   - "bootstrap credentials"
-  - "sudo access required"
+  - "check credential"
+  - "credential lookup"
   - "device credentials"
+  - "find password for [machine/service]"
+  - "find password for device"
+  - "get token for [service]"
+  - "git push 403"
+  - "how to log into"
+  - "look up credentials"
+  - "need sudo password"
+  - "need the password for"
+  - "save this password"
+  - "store this token"
+  - "sudo access required"
+  - "sudo 失败"
+  - "凭据存一下"
+  - "密钥归档"
+  - "查凭据"
+  - "记住这个密码"
 tools:
   - terminal
   - gpg
   - keepassxc-cli
 ---
+
+## Principle
+
+**Never invent, guess, or generate credentials.** Every machine and service in this fleet has its credentials stored in one of the known stores. If you don't find them, ask the user — don't create new tokens or passwords.
+
+## 硬规则（先于一切）
+
+**任何需要向设备/服务认证的任务——读取、保存、轮换凭据——动手前先加载本技能，
+无论你打算用什么方式拿凭据。** 包括：SSH 登录、git push 403、sudo 失败、API token
+获取、「这个密码帮我存一下」。memory 里的速查条目不能替代本技能的完整规程。
+**Never invent, guess, or generate credentials; not found → ask the user.**
+
+## Lookup Order
+
+Try each store in order. Stop when found.
+
+```
+1.  KeePassXC (Combined.kdbx)              ← primary
+2.  GPG-encrypted YAML (personal-credentials.yaml.gpg)
+3.  ~/.hermes/.env                          ← bootstrap secrets only
+4.  Ask the user                            ← last resort, NEVER fabricate
+```
+
+## 保存凭据（写路径规程）
+
+新获得的凭据**必须回写**，不许只留在会话里：
+
+1. **设备口令/token** → GPG YAML（`personal-credentials.yaml.gpg` 对应 device key，
+   编辑流程见 devops 版技能 `references/gpg-credential-edit-workflow.md`）；
+2. **服务账号** → KeePassXC（`keepassxc-cli add` 或用户 GUI 录入后同步确认）；
+3. **git remote 需要免密** → 密码进 KeePass 条目 + repo-local `credential.helper`
+   （见 `references/fleet-git-credential-helper.md`），**绝不把密码内联进 remote URL**
+   （会落进 `.git/config` 明文）。
+4. 写完验证：重新按查找顺序读一遍确认可达。
+
+## Gitea / git01 git 凭据落位
+
+**Gitea/git01 HTTP password lives in KeePassXC**, entry `/Sync/Passwords/Gitea - DS425Plus` (UserName alrcatraz, URL git01.wrt.astra-lab.org) — NOT only in pass store (whose GPG key needs interactive unlock and fails headless). Non-interactive git push: repo-local `credential.helper` that greps KEEPASS_PASSWORD from .env, pipes it to `keepassxc-cli show -s ... | sed -n '/^Password: /p'`.
+
 
 # Credential Store Management
 
