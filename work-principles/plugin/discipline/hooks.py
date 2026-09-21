@@ -186,7 +186,7 @@ _RESEARCH_TOOLS = frozenset({
     "browser_click", "browser_type",
     "browser_scroll", "browser_back",
     "browser_console", "browser_vision", "browser_get_images",
-    "mcp_kb_search",
+    "mcp_kb_search", "kb_mem_search",
     "todo",
     "discipline_set_phase",
     "clarify",
