@@ -140,6 +140,39 @@ astra-sre (orchestrator)
 - **After each incident** → write formatted post-mortem report to KB structure (symptom → diagnosis → root cause → fix → commands)
 - **Periodically audit** sub-skill library for stale/consolidatable entries
 
+### 6. Attempt state is not availability state (ADR 0007)
+
+A watcher MUST track two separate dimensions:
+
+- **availability**: whether the worker/transport is currently reachable;
+- **attempt state**: what happened to the delegated work (`running`,
+  `completion_prepare`, `possibly_completed`, `suspected_stale`,
+  `recovery_required`, `completed`, `failed`).
+
+A disconnect or process crash changes availability first; it MUST NOT directly
+rewrite the attempt to `idle` or `failed`. Preserve the attempt record and
+artifacts/logs, then recover or reconcile it. Completion recovery MUST use the
+same `attempt_id` unless a new attempt is explicitly minted by the orchestrator.
+Late results from an older attempt MUST be rejected by `attempt_id` and MUST
+NOT overwrite a newer attempt.
+
+For completion-sensitive work use the two-stage record:
+`completion_prepare` (durable, before acknowledgement) → `completion_commit`
+(after the artifact/acceptance proof). If commit is lost, inspect the prepare
+record, artifact, logs and independent acceptance before deciding whether to
+commit or retry. The Guardian watches and reports these states; it does not
+silently manufacture a new attempt or grant final acceptance.
+
+### 7. Real runtime acceptance is layered
+
+For A2A/ACP incidents, report these independently: transport reachable,
+protocol request/response, task terminal state, and usable generated output.
+A healthy listener plus `TASK_STATE_COMPLETED` is not enough to declare the
+service healthy if the provider returned an error or unusable text. Health
+checks SHOULD use a fixed short probe where safe, with explicit provider and
+context capability checks; credentials MUST remain process-local and probe
+artifacts MUST be cleaned.
+
 ## Sub-Skill Delegation Model
 
 When astra-sre detects a fault, it follows this decision tree:
@@ -277,23 +310,37 @@ Check SOUL.md for staleness whenever:
 
 ## Pitfalls
 
-1. **Resist scope creep.** astra-sre's job is coordinating, not implementing. If you find yourself writing domain-specific fix logic inside astra-sre, that logic belongs in a sub-skill.
+1. **A divergence between `main` and the integration branch silently deletes functionality.** A fix committed on one line does not exist on the other. Verified on `astra-knowledge-base-mcp`: `7c8327d` added `scripts/run-sse.sh` on `main` (2026-07-31, itself repairing a 7000-attempt restart loop); the deployment then moved to `develop` (2026-08-23), which had diverged with 12 commits of its own and never carried that file. The systemd unit restarted 9907 times over five weeks and the knowledge base stayed unreachable while every individual component looked healthy.
 
-2. **Knowledge base is not a dump.** Write structured entries: symptom → diagnosis → root cause → fix applied → commands used. Unstructured notes are noise.
+   When a service that *used to work* fails with `203/EXEC` / "unable to locate executable", check branch membership before touching the unit:
 
-3. **Two-strike rule is a guardrail, not a straitjacket.** If a first-occurrence fault is clearly part of a repeatable pattern (e.g. "disk full on /tmp" which happens monthly), feel empowered to create the sub-skill on the first strike. The rule prevents waste from one-offs, not prevents good judgement.
+   ```bash
+   git branch --contains <fix-sha>                      # which lines have the fix?
+   git rev-list --left-right --count <lineA>...<lineB>  # how far apart?
+   git reflog --date=iso                                # when/why the checkout moved
+   ```
 
-4. **Phase 1 is read-only.** Until Phase 3, astra-sre never writes to production systems. This is a deliberate safety boundary. Respect it.
+   A unit pointing at a script that exists on a sibling branch is a divergence symptom, not a script bug. Re-apply the fix to the deployed line, and **track the entrypoint in git on every line a deployment may check out** — an untracked entrypoint cannot survive a branch switch.
 
-5. **Auto-fix is gated by impact, not all-or-nothing.** L1 (no service impact) runs fully auto. L2 (brief impact) auto + notifies you. L3 (irreversible) requires your approval. This avoids both extremes — never auto-fixing anything (slow) and auto-fixing everything (dangerous). See `references/phase3-design.md` for the full classification.
+2. **A long-lived PostgreSQL connection with `autocommit = False` MUST roll back on error.** PostgreSQL error `25P02` ("current transaction is aborted") poisons the whole transaction: every later statement on that connection fails until it is rolled back. A plugin holding one connection and never rolling back turns a single transient driver error into a permanent wedge — verified on `context-anchor`, where one pg8000 `08P01` on 2026-09-18 produced 6371 exceptions over five days, firing on every `post_tool_call`. Recover the connection inside the backend (`rollback` + one retry around each statement), *and* fail open at the state layer, so neither alone can reintroduce the loop.
 
-6. **Credentials go in GPG, not in skill text.** When a fix step needs a password (e.g. SSH fallback), use `gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null` via stdin pipe — never hardcode in skill text. Credentials are grouped into four files by category (personal/work/other/temporary). See `astra-hub` skill for the full credential access guide.
+3. **Resist scope creep.** astra-sre's job is coordinating, not implementing. If you find yourself writing domain-specific fix logic inside astra-sre, that logic belongs in a sub-skill.
 
-7. **Knowledge base is searchable — use it.** Before diagnosing a novel fault, always `kb_search("sre_incidents", <symptom>)` first. Many problems have been seen before.
+4. **Knowledge base is not a dump.** Write structured entries: symptom → diagnosis → root cause → fix applied → commands used. Unstructured notes are noise.
 
-8. **Lock files survive crashes.** If a repair process is SIGKILL'd or the host crashes, `/tmp/astra-sre-lock-*.lock` files persist. The lock mechanism handles this via PID liveness check (`kill -0`). If a fix or diagnostic script finds a lock file, check `cat /tmp/astra-sre-lock-*.lock` for the PID — if `kill -0 <PID>` returns non-zero, the lock is stale; delete it and proceed. Do NOT hardcode lock-bypass logic.
+5. **Two-strike rule is a guardrail, not a straitjacket.** If a first-occurrence fault is clearly part of a repeatable pattern (e.g. "disk full on /tmp" which happens monthly), feel empowered to create the sub-skill on the first strike. The rule prevents waste from one-offs, not prevents good judgement.
 
-9. **Post-completion systemic audit — don't stop after the main fix.** After any significant system change, follow this 9-point scan to catch ripple effects (implements SOUL.md §3.1 同类扫描 + §1.1 方案求精):
+6. **Phase 1 is read-only.** Until Phase 3, astra-sre never writes to production systems. This is a deliberate safety boundary. Respect it.
+
+7. **Auto-fix is gated by impact, not all-or-nothing.** L1 (no service impact) runs fully auto. L2 (brief impact) auto + notifies you. L3 (irreversible) requires your approval. This avoids both extremes — never auto-fixing anything (slow) and auto-fixing everything (dangerous). See `references/phase3-design.md` for the full classification.
+
+8. **Credentials go in GPG, not in skill text.** When a fix step needs a password (e.g. SSH fallback), use `gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null` via stdin pipe — never hardcode in skill text. Credentials are grouped into four files by category (personal/work/other/temporary). See `astra-hub` skill for the full credential access guide.
+
+9. **Knowledge base is searchable — use it.** Before diagnosing a novel fault, always `kb_search("sre_incidents", <symptom>)` first. Many problems have been seen before.
+
+10. **Lock files survive crashes.** If a repair process is SIGKILL'd or the host crashes, `/tmp/astra-sre-lock-*.lock` files persist. The lock mechanism handles this via PID liveness check (`kill -0`). If a fix or diagnostic script finds a lock file, check `cat /tmp/astra-sre-lock-*.lock` for the PID — if `kill -0 <PID>` returns non-zero, the lock is stale; delete it and proceed. Do NOT hardcode lock-bypass logic.
+
+11. **Post-completion systemic audit — don't stop after the main fix.** After any significant system change, follow this 9-point scan to catch ripple effects (implements SOUL.md §3.1 同类扫描 + §1.1 方案求精):
 
    | # | Check | What to look for |
    |:--|:------|:-----------------|
