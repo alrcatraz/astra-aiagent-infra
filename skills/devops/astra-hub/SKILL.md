@@ -8,11 +8,14 @@ metadata:
   hermes:
     tags: [astra, ecosystem, knowledge-routing, project-index, memory]
 triggers:
-  - astra-hub
-  - astar
+  - "astra-hub"
+  - "astar"
+  - "astra 仓库总览"
+  - "哪个 repo 管什么"
+  - "组件登记册"
+  - "hub 路由"
   - astra hub
 ---
-
 # astra-hub — 生态地图索引
 
 > 加载此 skill 后，我能获得 astra-* 生态的全貌导航。
@@ -287,6 +290,12 @@ targets (addresses, keys) resolve via the GPG credential store
 |:----|:----|:------|
 | **execution-framework** | skill (devops) | 任务分类路由框架，取代子 skill 的关键词触发。所有 astra 工作流 skill 的路由入口。 |
 | **astra-lifecycle-sync** | 工具 (astra-aiagent-infra/lifecycle/) | 生命周期钩子同步工具。读取 `~/.astra/repos/astra-aiagent-infra/registry.yaml`，生成 closure/deploy 动态 checklist 到目标 SKILL.md。运行方式：`cd ~/.astra/repos/astra-aiagent-infra && uv run python3 lifecycle/astra-lifecycle-sync.py --update` |
+
+### 架构决策登记
+
+| 决策 | 要点 | 详情 |
+|:----|:-----|:-----|
+| 存储/业务分层 + KB 定位定案 (2026-09) | 存储类(PG/S3/valkey)集中 NAS 做"数据原语"；业务计算类无状态化+状态外置；软路由永不参与；共享 DB 走最小 platform 栈(B)、排除自建 DBaaS(C)；KB 记忆库=私有海马体非共享数据，共享的是四座策展库(hermes_config/service_mgmt/sre_incidents/dynamic_ref)；迁移行动清单见文末文件第七节 | `references/storage-compute-layering.md`（做任何迁移/新建有状态服务决策前先读） |
 
 ## ⚠️ 坑与教训
 

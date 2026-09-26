@@ -15,6 +15,7 @@ Every session gets its own row. No global/shared fields.
 import json
 import os
 import sqlite3
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -170,6 +171,14 @@ class PostgresBackend(Backend):
 
     def __init__(self, dsn: str):
         self._dsn = dsn
+        # Hermes runs hooks on many threads (hermes serve exposes ~59), and this
+        # backend holds ONE connection for the process lifetime. Concurrent
+        # statements on a shared manual-commit connection interleave their
+        # transactions: thread A's error aborts the transaction, thread B's
+        # statement then fails with 25P02 before A's rollback lands, and A's
+        # rollback clears the state B was reacting to. The result is a wedge
+        # that SURVIVES per-statement rollback, so access must be serialised.
+        self._lock = threading.RLock()
         try:
             import psycopg2
 
@@ -197,21 +206,38 @@ class PostgresBackend(Backend):
         except Exception:  # pragma: no cover - defensive
             pass
 
-    def _run(self, fn):
-        """Run *fn* against the connection, never leaving it poisoned.
+    def _is_poisoned(self) -> bool:
+        """Report whether the connection is stuck in an aborted transaction.
 
-        Any statement error triggers a rollback and one retry. This is what
-        stops the 25P02 cascade: after PostgreSQL aborts a transaction every
-        later statement on that connection fails until it is rolled back, so
-        recovering the connection has to happen here rather than in each
-        caller. If the retry also fails the error is raised for the caller to
-        degrade on (see state.py, which treats storage as best-effort).
+        A cheap probe: PostgreSQL rejects everything after an error until a
+        rollback clears it, so if this statement fails we are poisoned. Used
+        to recover a connection wedged by anything outside our own try blocks
+        (another thread, an interrupted statement, a killed worker).
         """
         try:
-            return fn()
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return False
         except Exception:
-            self._rollback()
-            return fn()
+            return True
+
+    def _run(self, fn):
+        """Run *fn* serially, recovering a poisoned connection first.
+
+        Two layers of defence, because either alone has been observed to fail:
+          1. the lock keeps another thread from interleaving a second
+             transaction onto this connection mid-statement;
+          2. the pre-flight probe clears a transaction that was aborted by
+             something we did not catch, plus one retry after any failure.
+        """
+        with self._lock:
+            if self._is_poisoned():
+                self._rollback()
+            try:
+                return fn()
+            except Exception:
+                self._rollback()
+                return fn()
 
     def _init_schema(self):
         def create():

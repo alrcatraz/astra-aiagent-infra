@@ -18,6 +18,7 @@ unit test rather than an integration test with side effects.
 
 import json
 import sys
+import time as _time
 import types
 from pathlib import Path
 
@@ -44,7 +45,16 @@ class StubCursor:
 
     def execute(self, sql, params=None):
         self._conn.statements.append(sql.strip().split("\n")[0][:60])
+        # PostgreSQL semantics: once a transaction is aborted, EVERY statement
+        # on that connection fails until a rollback clears it. Modelling this
+        # faithfully is what makes the concurrency test meaningful — a stub
+        # that only fails on an explicit flag cannot reproduce the real wedge.
+        if self._conn.txn_aborted:
+            self._conn.errors += 1
+            raise StatementError("current transaction is aborted")
         if self._conn.poison:
+            self._conn.txn_aborted = True
+            self._conn.errors += 1
             raise StatementError("current transaction is aborted")
         # Record the params actually bound, mirroring the real driver.
         self._conn.bound.append(params)
@@ -58,13 +68,21 @@ class StubConnection:
 
     def __init__(self):
         self.autocommit = True  # backend sets this explicitly
-        self.poison = False     # when True, every execute raises
+        self.poison = False     # when True, the next execute aborts the txn
+        self.txn_aborted = False  # sticky until rollback, like real PG
         self.statements = []
         self.bound = []
         self.commits = 0
         self.rollbacks = 0
+        # Counts only error-driven recovery. `load()` deliberately rolls back
+        # to end its implicit read transaction, so a raw rollback count cannot
+        # distinguish a healthy code path from a poisoned one.
+        self.errors = 0
         self.next_row = None
         self.closed = False
+        # Serialises the stub's own state so the test measures the plugin's
+        # locking, not the stub's thread-safety.
+        self._stub_lock = __import__("threading").Lock()
 
     def cursor(self):
         return StubCursor(self)
@@ -74,9 +92,11 @@ class StubConnection:
 
     def rollback(self):
         self.rollbacks += 1
-        # Real PostgreSQL clears the aborted state on rollback; emulate that so
-        # the test proves recovery rather than merely counting calls.
+        # Real PostgreSQL clears BOTH the aborted-transaction state and the
+        # pending fault on rollback; emulate that so the test proves recovery
+        # rather than merely counting calls.
         self.poison = False
+        self.txn_aborted = False
 
     def close(self):
         self.closed = True
@@ -89,6 +109,7 @@ def main() -> int:
     backend = backend_mod.PostgresBackend.__new__(backend_mod.PostgresBackend)
     backend._dsn = "stub"
     backend._conn = conn
+    backend._lock = __import__("threading").RLock()
     backend._init_schema()
 
     failures = []
@@ -141,6 +162,7 @@ def main() -> int:
     b2 = backend_mod.PostgresBackend.__new__(backend_mod.PostgresBackend)
     b2._dsn = "stub"
     b2._conn = conn2
+    b2._lock = __import__("threading").RLock()
     b2._init_schema()
     state_mod.get_backend = lambda: b2
 
@@ -155,6 +177,60 @@ def main() -> int:
         failures.append(f"{errors}/5 hook-equivalent calls raised (the 25P02 cascade)")
     if conn2.rollbacks < 1:
         failures.append("no rollback issued across repeated failures")
+
+    # ── 5. Serialisation: mutual exclusion on the shared connection ─────────
+    # Hooks run on ~59 threads over ONE connection (hermes serve) with no
+    # mutex in the pre-fix code. The lock is what prevents two threads from
+    # interleaving transactions on that connection.
+    #
+    # HONEST SCOPE: this asserts that access IS serialised — it does NOT
+    # reproduce the production 25P02 race. Timing-based attempts to reproduce
+    # it failed: 8 threads x 40 ops produced exactly the injected error count
+    # (no interleave at all), and the whole suite still passed with the lock
+    # removed. Under CPython's GIL the statement and its rollback are too close
+    # together for another thread to slip between them in-process. Reproducing
+    # the real race needs a network round-trip in the loop, so the production
+    # evidence for this fix is the lock's presence plus field observation —
+    # not this test.
+    import threading as _th
+
+    conn4 = StubConnection()
+    b4 = backend_mod.PostgresBackend.__new__(backend_mod.PostgresBackend)
+    b4._dsn = "stub"
+    b4._conn = conn4
+    b4._lock = _th.RLock()
+    b4._init_schema()
+    state_mod.get_backend = lambda: b4
+
+    overlap = []          # records concurrent entries, if any
+    inside = [0]
+    counter_lock = _th.Lock()
+
+    def detector():
+        """Sleep inside a call that holds b4._lock, recording overlap."""
+        def slow():
+            with counter_lock:
+                inside[0] += 1
+                if inside[0] > 1:
+                    overlap.append(inside[0])
+            _time.sleep(0.05)
+            with counter_lock:
+                inside[0] -= 1
+        b4._run(slow)
+
+    workers = [_th.Thread(target=detector) for _ in range(6)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join(timeout=15)
+
+    if overlap:
+        failures.append(
+            f"{len(overlap)} concurrent entr(ies) into the locked section "
+            f"(max depth {max(overlap)}) — the shared connection is not serialised"
+        )
+
+    print("=" * 62)
 
     print("=" * 62)
     if failures:
