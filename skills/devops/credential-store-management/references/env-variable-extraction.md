@@ -1,47 +1,40 @@
-# `.env` Variable Extraction Reference
+# Bootstrap Env-File Variable Extraction Reference
 
-## Reading Variables from `~/.hermes/.env`
+## Reading a single variable from an env file
 
-The `.env` file uses `export KEY=VALUE` format. Always use `grep` to read
-specific variables — never `source ~/.hermes/.env` (it may pull in unwanted
-state) and never `read_file` (it dumps the entire content to context).
-
-### Simple Value (no quotes)
+Read specific variables with `grep` — never `source` the file (it may pull in unwanted
+state) and never bulk-read it into context (that dumps every secret).
 
 ```bash
-grep '^KEY=' ~/.hermes/.env | cut -d= -f2-
+# bare KEY=value files:
+PW=$(grep '^KEY=' ~/.hermes/.env | cut -d= -f2-)
+
+# quote-safe (strips surrounding single/double quotes if present):
+PW=$(grep '^KEY=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//" | sed 's/^"//;s/"$//')
 ```
 
-### Single-quoted Value
+**Pitfall: grep pattern must match the file's actual style.** If lines are bare `KEY=`
+(no `export` prefix), an `^export KEY=` grep silently returns empty — downstream
+gpg/keepass calls then fail with confusing "Bad session key" / empty-password errors that
+look like credential problems but are extraction bugs. Inspect the format once before
+writing helpers against it.
 
-```bash
-grep '^KEY=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//"
-```
-
-### Full Variable Extraction on One Line (quotes safe)
-
-```bash
-PW=$(grep '^SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-```
-
-## Bootstrap Credential Lookup Chain
-
-When automated scripts need credentials:
+## Credential lookup chain (role-based)
 
 ```
 Need credential
   │
-  ├─ Bootstrap secrets (GPG passphrase, KeePass master, sudo) → from .env
+  ├─ Bootstrap layer (master passphrases: vault master, GPG key passphrase, sudo fallback)
+  │    → read from the env file by name
   │
-  ├─ Device credentials (SSH/sudo for servers) →
-  │   1. Read GPG_Key from .env
-  │   2. Decrypt GPG YAML file
-  │   3. Read target device info from YAML
+  ├─ Primary store (SSOT) — devices + services
+  │    → KeePassXC backend : unlock with vault master, query keepassxc-cli / pykeepass
+  │    → GPG-YAML backend : decrypt with GPG passphrase, parse YAML
+  │    → pass(1) backend  : gpg-agent-cached, `pass show <path>`
   │
-  └─ Website/app credentials →
-      1. Read KEEPASS_PASSWORD from .env
-      2. Query Combined.kdbx with keepassxc-cli
+  └─ Not found anywhere → ask the user; NEVER fabricate or generate
 ```
 
-**Key invariant:** `.env` contains only the minimal bootstrap secrets to unlock
-the other two layers. All device-specific secrets live in GPG-encrypted YAML.
+**Key invariant:** the env file holds only the minimal bootstrap secrets needed to unlock
+the stores. All device/service-specific secrets live in the SSOT — not in env files,
+skills, or memory.
