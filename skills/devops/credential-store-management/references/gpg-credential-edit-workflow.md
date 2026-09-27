@@ -1,5 +1,10 @@
 # GPG Credential File — Add/Edit Workflow
 
+Procedure for maintaining a GPG-encrypted YAML credential file (symmetric AES256).
+Applies when GPG-YAML is the live Layer-2 store, or as fallback maintenance on a frozen
+archive. **Core hazard: passphrase/stdin collision during re-encryption** — see Step 3.
+Always cp-backup first and verify by decrypting back before deleting anything.
+
 ## Prerequisites
 
 - GPG passphrase from `~/.hermes/.env`:
@@ -65,12 +70,28 @@ with open('/tmp/creds-decrypted.yaml', 'w') as f:
 
 ### Step 3: Re-encrypt
 
+**⚠️ Passphrase-feed hazard:** never `cat file | gpg --passphrase-fd 0 ...` — when stdin
+carries both passphrase and plaintext the pipe races and mangles the passphrase bytes,
+producing "Bad session key" ciphertext. Correct form: **plaintext as a FILE argument,
+fd 0 exclusively for the passphrase**:
+
 ```bash
-cat /tmp/creds-decrypted.yaml | gpg --batch --no-tty --yes \
-  --passphrase "$GPG_PASS" --pinentry-mode loopback \
-  --symmetric --cipher-algo AES256 \
-  -o ~/Documents/credentials/personal-credentials.yaml.gpg
+printf '%s' "$GPG_PASS" | gpg --batch --no-tty --yes --pinentry-mode loopback \
+  --passphrase-fd 0 --symmetric --cipher-algo AES256 \
+  -o ~/Documents/credentials/personal-credentials.yaml.gpg \
+  -- /tmp/creds-decrypted.yaml     # 明文走文件参数，fd0 只喂口令——勿用 cat|gpg（会产出坏密文）
 ```
+
+The most robust form is Python subprocess controlling both streams explicitly:
+
+```python
+subprocess.run(['gpg','--batch','--no-tty','--yes','--pinentry-mode','loopback',
+                '--passphrase-fd','0','--symmetric','--cipher-algo','AES256',
+                '-o',TARGET,'--',PLAINFILE], input=passphrase.encode())
+```
+
+**After encrypting, immediately decrypt back and byte-compare against the plaintext
+before deleting backups or temp files.**
 
 ### Step 4: Clean up
 

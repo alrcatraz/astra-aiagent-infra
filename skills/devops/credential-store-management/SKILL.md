@@ -1,12 +1,15 @@
 ---
 name: credential-store-management
-description: "Load BEFORE any task that authenticates to a device/service — reading, saving, or rotating passwords, tokens, keys. KeePassXC / GPG YAML / .env three stores, lookup order, save protocol, symptom triggers (403, auth fail)."
-category: devops
-version: 1.3.0+alrcatraz.0.0.0
+description: "Load BEFORE any task that authenticates to a device/service — reading, saving, or rotating passwords, tokens, keys. Store-agnostic three-layer protocol (bootstrap env → SSOT vault → consumers) with pluggable backends; lookup order, field discipline, save protocol, symptom triggers (403, auth fail)."
+version: 2.0.0+alrcatraz.0.0.0
 author: alrcatraz
+
+platforms: [linux, synology-dsm]
+
 metadata:
   hermes:
-    tags: [credentials, encryption, secrets-management, gpg, password-store]
+    tags: [credentials, passwords, authentication, ssh, keepass, gpg, secrets]
+
 triggers:
   - "GPG credential"
   - "Keepass query"
@@ -33,269 +36,184 @@ triggers:
   - "密钥归档"
   - "查凭据"
   - "记住这个密码"
+
 tools:
   - terminal
-  - gpg
   - keepassxc-cli
+  - gpg
 ---
 
-## Principle
-
-**Never invent, guess, or generate credentials.** Every machine and service in this fleet has its credentials stored in one of the known stores. If you don't find them, ask the user — don't create new tokens or passwords.
+# Credential Store Management
 
 ## 硬规则（先于一切）
 
 **任何需要向设备/服务认证的任务——读取、保存、轮换凭据——动手前先加载本技能，
 无论你打算用什么方式拿凭据。** 包括：SSH 登录、git push 403、sudo 失败、API token
 获取、「这个密码帮我存一下」。memory 里的速查条目不能替代本技能的完整规程。
-**Never invent, guess, or generate credentials; not found → ask the user.**
 
-## Lookup Order
+## Principle
 
-Try each store in order. Stop when found.
+**Never invent, guess, or generate credentials.** Every machine and service has its
+credentials in one of the known stores. Not found → ask the user; never fabricate.
+
+## Architecture: three layers, pluggable backends
+
+Layers are functional roles, not specific files. Different users run different backends
+per layer — some skip a layer entirely (e.g. they memorise web passwords and keep only an
+encrypted vault for machines; some use only a password manager). **Discover which backend
+is live before assuming the paths below.**
 
 ```
-1.  KeePassXC (Combined.kdbx)              ← primary
-2.  GPG-encrypted YAML (personal-credentials.yaml.gpg)
-3.  ~/.hermes/.env                          ← bootstrap secrets only
-4.  Ask the user                            ← last resort, NEVER fabricate
+Layer 1 — BOOTSTRAP (unlocks everything else)
+  Role: master passphrases ONLY — vault master password, GPG key passphrase,
+  local sudo fallback. Never device/service secrets.
+  Example backend: ~/.hermes/.env, bare KEY=value lines
+  (NO export prefix — grep '^KEY='; an '^export KEY=' grep silently returns empty)
+
+Layer 2 — PRIMARY CREDENTIAL STORE (SSOT)
+  Role: ALL device + service secrets.
+  Example backends: KeePassXC DB (kdbx), GPG-encrypted YAML, pass(1), sops/age.
+  Whatever is live here is the single write target for new credentials.
+
+Layer 3 — CONSUMERS
+  Runtime configs (.env per service, git credential helpers) READ from Layer 2 on
+  demand; they never duplicate secrets.
 ```
+
+### Lookup Order
+
+```
+1.  Layer-2 SSOT                      ← always first
+2.  Fallback archives (frozen copies) ← read-only; divergence → SSOT wins, report it
+3.  Layer-1 bootstrap                 ← only used to unlock the above
+4.  Ask the user                      ← NEVER fabricate
+```
+
+## Field discipline (what goes where in a vault entry)
+
+| Data | Field |
+|:-----|:------|
+| True account+password login (web panel, SSH user) | UserName + Password (+ URL; Additional URLs for browser integration) |
+| API tokens, PATs, secret keys, bearer tokens | **custom attributes** — never the Password field |
+| Identity documents, PEMs, structured config | **attachments** |
+| Usage context, endpoints, semantics, caveats | **notes** |
+
+A vault whose Password field holds a non-password (token) is a schema smell — merge and
+re-file as attributes. Likewise, scattered per-key entries for one service should be
+merged into a single service entry with each key as a named attribute.
+
+## Layout conventions (KeePassXC backend)
+
+Machine-readable subtree under a dedicated group (e.g. `Sync/Fleet/`), separated from
+the user's personal groups so headless sync can scope itself:
+
+- `Devices/<domain>/` — one entry per device, title `<ABBR> <hostname>`. Login lives in
+  UserName/Password; connection paths (ordered by network preference), ports, OS, status
+  live in custom attributes; URL = primary DNS name.
+- `Agents/` — one entry per agent identity: DID/identity docs as attachments, gateway/API
+  keys as attributes, scope notes. **Keys follow the agent, not the runtime program.**
+- `Services/<class>/` — infrastructure services, merged per the field-discipline rule.
+- SSH keys follow the **system entry** of the machine that runs them — there is never a
+  central key entry; see `references/ssh-key-domain-model.md` (fleet/kin/external
+  three-domain model, attributes-vs-attachments placement, passphrase policy, fleet
+  `~/.ssh/config` managed block convention).
+
+Human-domain entries (website logins the user created) live in the user's own groups
+(`Passwords`, `Passwords with Passkeys`, …). **Augment in place** (attributes / notes /
+attachments); never duplicate, never relocate into the machine subtree. Category dirs
+that exist purely to organize hold no entries.
+
+If multiple clients share the vault through a sync container: keep the container scoped
+to the machine subtree, give containers their own master passwords when warranted, and
+make pull the default direction with push explicitly opted-in and path-scoped.
 
 ## 保存凭据（写路径规程）
 
-新获得的凭据**必须回写**，不许只留在会话里：
+新获得的凭据**必须回写 Layer-2 SSOT**，不许只留在会话里：
 
-1. **设备口令/token** → GPG YAML（`personal-credentials.yaml.gpg` 对应 device key，
-   编辑流程见 devops 版技能 `references/gpg-credential-edit-workflow.md`）；
-2. **服务账号** → KeePassXC（`keepassxc-cli add` 或用户 GUI 录入后同步确认）；
-3. **git remote 需要免密** → 密码进 KeePass 条目 + repo-local `credential.helper`
-   （见 `references/fleet-git-credential-helper.md`），**绝不把密码内联进 remote URL**
-   （会落进 `.git/config` 明文）。
-4. 写完验证：重新按查找顺序读一遍确认可达。
+1. 按布局约定选落位（设备 / Agents / Services / 人类域就地增补），按字段纪律选栏位；
+2. **写完立即验证**：重新打开库读回该值比对，再触发同步（Fleet-scoped push）；
+3. **git remote 免密** → repo-local `credential.helper` resolving from the vault
+   （见 `references/fleet-git-credential-helper.md`）；**绝不把密码内联进 remote URL**
+   （会落进 `.git/config` 明文）；
+4. Frozen fallback archives are **not write targets**; on value divergence, the SSOT
+   wins — report it rather than editing the archive.
 
-## Gitea / <gitea-host> git 凭据落位
-
-**Gitea/<gitea-host> HTTP password lives in KeePassXC**, entry `/Sync/Passwords/Gitea - <nas-host>` (UserName alrcatraz, URL <gitea-host>) — NOT only in pass store (whose GPG key needs interactive unlock and fails headless). Non-interactive git push: repo-local `credential.helper` that greps KEEPASS_PASSWORD from .env, pipes it to `keepassxc-cli show -s ... | sed -n '/^Password: /p'`.
-
-
-# Credential Store Management
-
-Three-layer credential architecture — bootstrap secrets unlock device credentials, which unlock service accounts.
-
-## Layer Architecture
-
-```
-Need credential
-  │
-  ├─ Layer 1: Bootstrap secrets (.env)
-  │   └─ GPG passphrase, KeePass master password, sudo password (local)
-  │   └─ ~/.hermes/.env  (bare KEY=value lines, NO export prefix — grep '^KEY='; an '^export KEY=' grep silently returns empty)
-  │
-  ├─ Layer 2: Device credentials (GPG YAML)
-  │   ├─ ~/Documents/credentials/personal-credentials.yaml.gpg
-  │   ├─ ~/Documents/credentials/work-credentials.yaml.gpg
-  │   └─ ~/Documents/credentials/other-credentials.yaml.gpg
-  │
-  └─ Layer 3: Service accounts (KeePassXC)
-      └─ ~/Documents/KeePassXC/Combined.kdbx
-```
-
-## Layer 1: Bootstrap from .env
-
-Use `grep` to read specific variables (never `source` the file, never `read_file` the whole thing):
-
-```bash
-# GPG passphrase (to decrypt Layer 2)
-GPG_PASS=$(grep '^GPG_Key=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-
-# KeePass master password (to unlock Layer 3)
-KP_PASS=$(grep '^KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-
-# Local sudo password (fallback — see Practical Workflow below)
-SUDO_PASS=$(grep '^SUDO_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-```
-
-**Key invariant:** .env contains only the minimal bootstrap secrets to unlock the other two layers. All device-specific secrets live in GPG-encrypted YAML.
-
-## Layer 2: Credentials (GPG YAML)
-
-### Device Credentials
-
-### Service Credentials
-
-The same GPG file also stores service-level credentials. Extract with `python3 -c`:
-
-```bash
-GPG_PASS=$(grep '^GPG_Key=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-
-# Gitea PAT
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['gitea']['api_token'])"
-
-# ZTNet controller API token
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['ztnet']['api_token'])"
-
-# EasyTier Web Console internal auth token
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['easytier_web_console']['internal_auth_token'])"
-
-# Synapse admin token
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['synapse']['admin_token'])"
-```
-
-Use these in skill documentation as `<token>` placeholders with a comment referencing `credential-store-management`.
-
-### YAML Structure
-
-```yaml
-devices:
-  <device-key>:
-    hostname: <Hostname>
-    network:
-      main_ip: <MAIN-IP>
-    accounts:
-      - username: <user>
-        access: sudo
-        password: <PASSWORD>
-        note: sudo 密码
-    access:
-      methods:
-        - type: local
-          note: Hermes Agent runs here
-```
-
-Each device has:
-- `accounts[]` — user accounts with access level and password
-- `access.methods[]` — how to reach the device (ssh_key, password, local)
-- `connection.paths[]` — routing options (direct, proxyjump via...)
-
-### Decrypt a device entry
-
-```bash
-GPG_PASS=$(grep '^GPG_Key=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | grep -A10 "  <device-key>:"
-```
-
-### Full decrypt (for editing)
-
-```bash
-GPG_PASS=$(grep '^GPG_Key=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  > /tmp/creds-decrypted.yaml
-# ... edit /tmp/creds-decrypted.yaml ...
-cat /tmp/creds-decrypted.yaml | gpg --batch --no-tty --yes \
-  --passphrase "$GPG_PASS" --pinentry-mode loopback \
-  --symmetric --cipher-algo AES256 \
-  -o ~/Documents/credentials/personal-credentials.yaml.gpg
-rm -f /tmp/creds-decrypted.yaml
-```
-
-## Layer 3: Service Accounts (KeePassXC)
+## Reading recipes (KeePassXC backend)
 
 ```bash
 KP_PASS=$(grep '^KEEPASS_PASSWORD=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-echo "$KP_PASS" | keepassxc-cli search ~/Documents/KeePassXC/Combined.kdbx "<keyword>"
-echo "$KP_PASS" | keepassxc-cli show -s ~/Documents/KeePassXC/Combined.kdbx "<entry-path>"
+
+echo "$KP_PASS" | keepassxc-cli search <DB.kdbx> "<keyword>"
+echo "$KP_PASS" | keepassxc-cli show -s <DB.kdbx> "<entry-path>"
 ```
 
-The helper script at `scripts/keepass-query.sh` wraps this workflow.
+Prefer **pykeepass** for bulk/programmatic work — CLI parsing drops custom properties and
+attachments. Helper: `scripts/keepass-query.sh`.
+Headless edit recipe (verified 2026-09-26): run with `~/.hermes/hermes-agent/venv/bin/python`
+(kernel default python lacks pykeepass) → `kp.find_entries(title=..., first=True)` →
+assign `e.password` → `kp.save()`; then REOPEN the db, read back, compare, and live-test
+the credential (e.g. ssh echo ok) before declaring done. `get_entries_by_title` does not
+exist — it is `find_entries(title=)`.
+
+GPG-YAML backend (archive or primary, depending on deployment):
+
+```bash
+GPG_PASS=$(grep '^<GPG_KEY_VAR>=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
+printf '%s' "$GPG_PASS" | gpg --batch --no-tty --pinentry-mode loopback --passphrase-fd 0 \
+  --decrypt <file>.yaml.gpg 2>/dev/null
+```
+
+Editing such a file: decrypt to temp → edit → re-encrypt with **plaintext as a FILE
+argument** together with `--passphrase-fd 0`; never `cat file | gpg --passphrase-fd 0`
+(stdin collision mangles the passphrase → corrupt ciphertext). Always re-decrypt and
+verify round-trip before deleting backups. Details: `references/gpg-credential-edit-workflow.md`.
 
 ## Practical Workflow: Device Sudo Access
 
-When you need to run sudo on a device (including the local machine):
-
-### Step 1: Find the device's sudo password
-
-**Device key convention:** lowercase-no-spaces. `<device-key>` examples: a
-resident workstation, a storage NAS, a router, a GPU server, etc. — actual keys
-live in the GPG credential store, not in this skill.
-
-```bash
-GPG_PASS=$(grep '^GPG_Key=' ~/.hermes/.env | cut -d= -f2- | sed "s/^'//;s/'$//")
-DEVICE_PASS=$(echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopback \
-  --decrypt ~/Documents/credentials/personal-credentials.yaml.gpg 2>/dev/null \
-  | python3 -c "
-import sys, yaml
-data = yaml.safe_load(sys.stdin)
-device = data.get('devices', {}).get('<device-key>', {})
-for acct in device.get('accounts', []):
-    if acct.get('access') == 'sudo':
-        print(acct.get('password', ''))
-        break
-")
-echo "$DEVICE_PASS"
-```
-
-### Step 2: Execute sudo — Mandatory Pattern
-
-**Hermes terminal intercepts `sudo -S` with direct pipe to `tee`, `bash -c`, or inline heredoc.** These fail with `sudo_auth_failed: true` even with the correct password.
-
-**✅ Only reliable pattern — temporary script:**
+1. Resolve the device entry in the SSOT; its Password field is the login/sudo password.
+   Device keys are lowercase-no-spaces hostnames.
+2. Execute via the **only pattern that survives Hermes terminal's security layer** —
+   standalone temp script, never pipe-into-shell-construct:
 
 ```bash
 cat > /tmp/sudo-job.sh << 'SCRIPT'
-# Your privileged commands here
-systemctl restart zerotier-one
+systemctl restart <unit>
 SCRIPT
 chmod +x /tmp/sudo-job.sh
 echo "$DEVICE_PASS" | sudo -S /tmp/sudo-job.sh
-```
-
-**❌ Patterns that fail:**
-```bash
-echo "$PASS" | sudo -S tee /path/file          # → sudo_auth_failed
-echo "$PASS" | sudo -S sh -c 'cmd > /path'     # → sudo_auth_failed
-```
-
-**Reason:** Hermes terminal's security layer flags `sudo` receiving stdin from a pipe into a shell construct. A standalone script file passes through as a simple command execution.
-
-**SUDO_ASKPASS** does not work either — Hermes terminal forces `-S` mode.
-
-### Step 3: Clean up
-
-```bash
 rm -f /tmp/sudo-job.sh
 ```
 
+   ❌ `echo "$PASS" | sudo -S tee/sh -c ...` → `sudo_auth_failed` even with the right
+   password. `SUDO_ASKPASS` is also blocked (terminal forces `-S`). On remote hosts wrap
+   inner commands in `sh -c '...'` inside the script to survive SSH quoting.
+
 ## Pitfalls
 
-### 1. GPG passphrase in .env is the master key
-
-The `GPG_Key` passphrase (in `~/.hermes/.env`, **never in git or skills**)
-unlocks ALL device secrets. Keep it private. If you suspect exposure, rotate it
-and re-encrypt the GPG stores.
-
-### 2. Device key ≠ hostname
-
-YAML device keys use lowercase-no-spaces format:
-- `<device-key>` (not "Hostname" or "host-name") — lowercase-no-spaces format
-- Actual device keys resolve via the GPG credential store, not this skill
-
-Search with `grep -A2 "hostname:.*[part]"` on the decrypted YAML.
-
-### 3. Multiple password fields in same entry
-
-Some devices have duplicate `value:` lines (editing artifact). Use the last non-null value, or cross-check `access.methods`.
-
-### 4. Sudo password differs per device
-
-Device sudo passwords are **not uniform** — never assume the `.env`
-SUDO_PASSWORD applies to remote devices. Resolve each device's actual password
-from the GPG credential store (`personal-credentials.yaml.gpg` →
-`devices.<key>.accounts[].password`), never from a hardcoded table.
+1. **Bootstrap passphrase is the master key** — if exposed, rotate it AND re-encrypt
+   every store it unlocks. Keep real secrets out of skills, memory, and git; reference
+   vault entries by title/path and resolve values at runtime.
+2. **Sudo passwords differ per device** — resolve each from its SSOT entry; never assume
+   the local fallback applies remotely.
+3. **CLI `add -g` GENERATES a random password** and discards the intended value; after
+   any scripted write, verify values by hash against the source.
+4. **Two-database operations need two passwords** — merge/sync between a main DB and a
+   sync container may prompt twice; keepassxc-cli prompt-order bugs silently corrupt
+   merges (prefer pykeepass, which takes them as arguments).
+5. **pykeepass gotchas**: `kp.entries` can miss freshly-added rows — iterate
+   `group.entries` via `find_groups(...)`; `Entry.path` is a LIST of strings, not a path
+   string; `add_binary()` returns the binary id int directly; `Group.groups` does not
+   exist (use `.subgroups`).
+6. **Recycle-bin ghosts** — old duplicates sitting in the Recycle Bin still appear in
+   some traversals and can resurrect through bidirectional merges; filter by path and
+   verify convergence (dry-run shows pull=0 push=0) after any consolidation.
 
 ## References
 
+- `references/ssh-key-domain-model.md` — SSH fleet/kin/external key domains, vault placement, config block
 - `references/env-variable-extraction.md` — Reading .env variables safely
 - `references/session-token-extraction.md` — Token/cookie extraction from browsers
-- `references/gpg-credential-edit-workflow.md` — Full GPG edit cycle
+- `references/gpg-credential-edit-workflow.md` — GPG YAML edit cycle (archive/legacy backend)
+- `references/fleet-git-credential-helper.md` — Non-interactive git auth from the vault
 - `scripts/keepass-query.sh` — KeePass lookup helper
