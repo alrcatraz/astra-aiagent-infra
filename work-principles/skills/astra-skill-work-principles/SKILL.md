@@ -104,10 +104,18 @@ Same applies to `[HARNESS: task_started]`, `[HARNESS: casual]`,
 
 | Marker | Meaning | Phase transition |
 |:-------|:--------|:----------------|
-| `[HARNESS: task_started]` | This is a real task | Enter task_started + activate Research Gate. If mid-work (executing/modifying/planning…), the current phase is **suspended** (branch-task support) and resumed after closure. |
+| `[HARNESS: task_started]` | This is a real task | Enter task_started + activate Research Gate (mutation-only). If mid-work (executing/modifying/planning…), the current phase is **suspended** (branch-task support) and resumed after closure. |
 | `[HARNESS: plan]` | Research done, here is my plan | Enter planning + clear Research Gate. Mid-work plan also suspends the current phase. |
 | `[HARNESS: casual]` | Just chatting | Reset to no_task, drop suspended stack |
 | `[HARNESS: done]` | Task complete | Enter closing (checkpoint). A second `done` **confirms closure**: resume the suspended task (if any) or archive to no_task. |
+
+**Marker turns must be cheap and never bare.** A marker-only turn carries at
+most one short sentence plus the marker — and `[HARNESS: task_started]` in
+particular belongs on the SAME turn the task is recognised, before that turn's
+research calls let auto-detect lock the gate behind your back. Never end a
+marker turn having done nothing else visible: two consecutive user-visible
+stops at `task_started` reads as "the harness is broken" and burns a debugging
+cycle on the agent's own cadence.
 
 **CLOSING is a checkpoint, not a dead end.** After running the closure
 checklist, all four markers are legal exits:
@@ -140,8 +148,7 @@ used for isolation.
 
 ### Read-only terminal command whitelist
 
-During research (Research Gate active) or closing (Closure Gate active),
-only read-only terminal commands are allowed:
+The shared classifier behind all gates:
 
 ```
 cat, ls, head, tail, grep, find, stat, df, du, ps, which,
@@ -151,8 +158,38 @@ git status, git log, git diff, nvidia-smi, ...
 ```
 
 Additionally, `git/docker/podman/systemctl` subcommands are filtered:
-`git push/commit/merge/reset` are blocked; `git status/log/diff` are
-allowed.
+`git push/commit/merge/reset` are blocked; `git status/log/diff` are allowed.
+
+**Compound commands defeat the classifier — write them single-purpose during
+gated phases.** Only the FIRST command of a chain/pipeline is inspected, so
+`cd dir && git status` or `cmd | head -40` classify as mutating and get
+blocked. Use `git -C <dir> status` instead of cd-chains, and read_file /
+search_files / execute_code (stdlib-only analysis) instead of shell pipelines.
+
+**Known false-block shapes (audit 2026-09-23, still unfixed in hooks.py):**
+`curl` GET is treated as mutating unless it uses `-I/--head`; `sleep N` is
+not on the whitelist; `VAR=$(grep …)` env-prefix assignments are stripped but
+the following command is then re-checked from scratch (`gpg --decrypt` still
+judged mutating); wrapper scripts like `bash /tmp/x.sh '<url>'` always fail
+classification. During research-pending, prefer web_search/web_extract over
+curl GET, and submit `[HARNESS: plan]` early if you will touch files or skills.
+
+### Remote-access gate
+
+`ssh host 'tail log'`, scp pull and rsync pull pass in modifying/planning/
+closing without declaring `accessing_device` — the remote command half is
+judged by the same read-only classifier. Anything WRITING to a remote device
+(scp/rsync push, remote rm/mkdir, bare interactive ssh) still requires the
+explicit phase. When extending this logic keep paired positive AND negative
+test cases per command shape — allow-list drift is silent.
+
+## Proposal Gate 的「方案正文」标准（2026-09-23 用户两次纠正）
+
+Proposal Gate 👥 不只是"等一句可以"——待批物必须是**方案正文本身**，不是摘要或预告：
+
+- 用户说「给我看方案/计划」时 = 把将要落盘的完整内容（文档全文、diff 清单、逐项表格）直接贴在回复里审阅；只报"我打算写个 XX 模型"不算方案。
+- 审批未过前不得进入下一步（包括建文件、commit、改技能）。口头讨论定案 ≠ 入库许可；"行，继续"批准的是**当时展示的那一版**，中途扩写的内容须重新过目。
+- 抽象/泛化类方案先确认适用范围再动笔（例：塔模型本意=所有项目通用，写成"仅 fork"会被打回——范围偏差本身就是方案缺陷）。
 
 ## Progress reporting cadence (hard rule)
 
@@ -177,6 +214,21 @@ allowed.
 
 ## What Changed
 
+- **Research gate → "reach, don't enter" (2026-09-18)** — While a plan is
+  pending only *state-changing* tools are blocked (`write_file`, `patch`,
+  `skill_manage`, mutating terminal commands, `delegate_task`, browser
+  mutations…); every investigation tool and read-only command passes freely.
+  The old whitelist frisked each call and dead-ended legitimate research until
+  the only exit was falsely claiming `[HARNESS: plan]`. The user's approval at
+  planning is the primary gate; code locks are the last resort.
+- **Gate relaxations from audit data (2026-09-18)** — `accessing_device` now
+  permits local file writes (was the largest false-block source); read-only
+  remote inspection passes in work phases; `execute_code` allowed in closing
+  for checklist stats. Implementation lives in
+  `~/.astra/repos/astra-aiagent-infra/work-principles/plugin/discipline/hooks.py`
+  with paired positive/negative cases in `plugin/tests/test_harness_integration.py`
+  — run that suite after ANY hooks.py change
+  (`python3 tests/test_harness_integration.py`).
 - **Execution-framework routing removed** — The `acknowledge_execution_framework`
   tool, the `recommend_steps.json` injection, and the SOUL.md §0.2 self-call
   instruction are all gone.

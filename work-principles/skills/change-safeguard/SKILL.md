@@ -2,8 +2,17 @@
 name: change-safeguard
 description: "Mandatory pre-change safeguarding checks and post-change side-effect scan: three-tier backup, environment baseline recording, five-point post-change scan."
 category: devops
----
+triggers:
+  - "改配置前备份"
+  - "safeguard check"
+  - "变更前检查"
+  - "回滚准备"
+  - "side-effect scan"
+metadata:
+  hermes:
+    tags: [backup, rollback, side-effects, safety]
 
+---
 # change-safeguard
 
 ## Trigger Conditions
