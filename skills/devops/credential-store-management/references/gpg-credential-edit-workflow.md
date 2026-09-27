@@ -117,3 +117,4 @@ echo "$GPG_PASS" | gpg --batch --no-tty --passphrase-fd 0 --pinentry-mode loopba
 - **Password quoting**: If the password contains special characters (`@`, `$`, `!`), quote it in YAML: `value: '<dummy-password>'`
 - **SSH key note**: After deploying an SSH key, update the entry's note to reflect that the password is fallback-only.
 - **Always re-encrypt immediately**: Do not leave the decrypted file on disk longer than needed.
+- **Device passwords live under `accounts[].password`**, not a top-level `password:` key — when hash-comparing vault entries against this archive to adjudicate which copy is authoritative, walk the `accounts` list; reading `device['password']` returns empty and every comparison falsely matches (sha256 of '').
