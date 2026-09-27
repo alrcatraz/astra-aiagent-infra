@@ -9,7 +9,15 @@ Backend is selected automatically via CONTEXT_ANCHOR_DATABASE_URL:
   unset             → SQLite at ~/.hermes/persistent/context-anchor.db
 """
 
+import logging
+
 from .backend import get_backend, close_backend
+
+logger = logging.getLogger(__name__)
+
+# Save failures are logged once per exception type, not per call — a wedged
+# database would otherwise flood the log on every post_tool_call hook.
+_warned_save_failures: set[str] = set()
 
 
 # ── Default state for a fresh session ──────────────────────────────
@@ -39,18 +47,40 @@ def _default_state(session_id: str) -> dict:
 
 
 def _load_or_default(session_id: str) -> dict:
-    """Load state for *session_id*, or create a fresh default."""
-    backend = get_backend()
-    state = backend.load(session_id)
+    """Load state for *session_id*, or create a fresh default.
+
+    Storage is best-effort: if the backend is unreachable the session simply
+    runs on defaults for this call rather than raising into the hook chain.
+    A context anchor that cannot read its store must degrade, not break the
+    agent turn (see also PostgresBackend's rollback discipline).
+    """
+    try:
+        backend = get_backend()
+        state = backend.load(session_id)
+    except Exception as e:  # pragma: no cover - depends on DB availability
+        logger.warning("context-anchor: load failed (%s); using defaults", e)
+        return _default_state(session_id)
     if state is None:
         state = _default_state(session_id)
     return state
 
 
 def _save(session_id: str, state: dict):
-    """Persist state for *session_id* via the active backend."""
-    backend = get_backend()
-    backend.save(session_id, state)
+    """Persist state for *session_id* via the active backend.
+
+    Fail-open: a write error is logged once per reason and swallowed so the
+    calling hook returns normally. Losing an anchor update is recoverable;
+    raising on every post_tool_call is not.
+    """
+    try:
+        backend = get_backend()
+        backend.save(session_id, state)
+    except Exception as e:  # pragma: no cover - depends on DB availability
+        reason = type(e).__name__
+        if reason not in _warned_save_failures:
+            _warned_save_failures.add(reason)
+            logger.warning("context-anchor: save failed (%s: %s); state not persisted",
+                           reason, e)
 
 
 # ── Public API ─────────────────────────────────────────────────────
