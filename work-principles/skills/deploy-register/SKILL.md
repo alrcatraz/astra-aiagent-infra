@@ -2,8 +2,17 @@
 name: deploy-register
 description: "Mandatory registration checklist after deploying a new service or facility: register in service inventory, attach health checks, clean up residuals."
 category: devops
----
+triggers:
+  - "部署完登记"
+  - "service inventory 注册"
+  - "新服务上线收尾"
+  - "deploy checklist"
+  - "健康检查挂上"
+metadata:
+  hermes:
+    tags: [deployment, registration, inventory, health-checks]
 
+---
 # deploy-register
 
 ## Trigger Conditions
@@ -37,6 +46,43 @@ Also triggered by: 部署、安装服务、启动服务、注册服务、配置�
 - [ ] **是否有旧版本、旧进程或旧配置需要清理？**
 - [ ] **部署过程中是否产生了临时文件？** 清理了吗？
 - [ ] **如果将来移除这个服务，需要清理什么？** 数据库记录、检查脚本、引用文档。
+
+
+
+<!-- LIFECYCLE_HOOKS_BEGIN -->
+**Deploy lifecycle hooks — auto-generated.** Do not edit manually.
+Run `astra-lifecycle-sync --update` to refresh.
+
+### From work-principles
+- [🔴] 部署新服务后注册到服务清单 + 健康检查 → 详见 work-principles/skills/deploy-register
+  *(required, trigger: new service, MCP, or CLI tool deployed)*
+
+### From astra-hub
+- [🔴] 验证 Hub 项目索引表包含所有 registry 中已注册的组件（不含已吸收的独立条目）
+  *(required, trigger: registry.yaml modified（新增/移除组件）)*
+  ```bash
+  grep -c '|' ~/Projects/astra/astra-aiagent-infra/skills/devops/astra-hub/SKILL.md | head -1 || echo 'Manual check: compare Hub index vs registry.yaml components'
+  ```
+
+### From astra-vcs-assist
+- [🔴] Register all sub-skill symlinks in Hermes discovery path
+  *(required, trigger: new clone or first deploy of vcs-assist)*
+  ```bash
+  mkdir -p "$HOME/.hermes/skills/vcs" && ln -sfn "$HOME/.astra/repos/astra-vcs-assist" "$HOME/.hermes/skills/vcs/astra-vcs-assist" && for d in gpg/astra-vcs-assist-gpg-key git/skills/astra-vcs-assist-git-init git/skills/astra-vcs-assist-git-dev git/skills/astra-vcs-assist-git-release git/skills/astra-vcs-assist-git-sync; do ln -sfn "$HOME/.astra/repos/astra-vcs-assist/$d" "$HOME/.hermes/skills/vcs/$(basename $d)"; done
+
+  ```
+- [🔴] Verify all sub-skill SKILL.md files exist
+  *(required, trigger: deploy or update of vcs-assist)*
+  ```bash
+  for f in SKILL.md gpg/astra-vcs-assist-gpg-key/SKILL.md git/skills/astra-vcs-assist-git-init/SKILL.md git/skills/astra-vcs-assist-git-dev/SKILL.md git/skills/astra-vcs-assist-git-release/SKILL.md git/skills/astra-vcs-assist-git-sync/SKILL.md; do test -f "$HOME/.astra/repos/astra-vcs-assist/$f" || echo "MISSING: $f"; done
+
+  ```
+
+### From astra-sre
+- [🔴] Register new device in SRE config/devices.yaml
+  *(required, trigger: new device added to infrastructure)*
+
+<!-- LIFECYCLE_HOOKS_END -->
 
 
 ## Pitfalls

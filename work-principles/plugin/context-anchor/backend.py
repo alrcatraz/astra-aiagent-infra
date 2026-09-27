@@ -15,6 +15,7 @@ Every session gets its own row. No global/shared fields.
 import json
 import os
 import sqlite3
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,10 +159,26 @@ class PostgresBackend(Backend):
     case inside Hermes' venv). Both expose the DB-API 2.0 surface this class
     uses: ``connect``, ``cursor()``, ``commit()``, ``close()`` and
     ``%s``-style paramstyle.
+
+    Connections are long-lived (one per process), so every statement runs
+    inside an explicit transaction. That makes **rollback on failure
+    mandatory**: PostgreSQL error 25P02 ("current transaction is aborted")
+    poisons the whole transaction after any single error, and every later
+    statement on the same connection then fails until it is rolled back.
+    Without this, one transient driver error wedges the anchor permanently
+    and raises on every subsequent pre_llm_call / post_tool_call hook.
     """
 
     def __init__(self, dsn: str):
         self._dsn = dsn
+        # Hermes runs hooks on many threads (hermes serve exposes ~59), and this
+        # backend holds ONE connection for the process lifetime. Concurrent
+        # statements on a shared manual-commit connection interleave their
+        # transactions: thread A's error aborts the transaction, thread B's
+        # statement then fails with 25P02 before A's rollback lands, and A's
+        # rollback clears the state B was reacting to. The result is a wedge
+        # that SURVIVES per-statement rollback, so access must be serialised.
+        self._lock = threading.RLock()
         try:
             import psycopg2
 
@@ -178,44 +195,105 @@ class PostgresBackend(Backend):
                 pass
         self._init_schema()
 
+    def _rollback(self) -> None:
+        """Abort the current transaction so the connection stays usable.
+
+        Best-effort: a rollback can itself fail (dead connection), in which
+        case the caller's original exception is still the informative one.
+        """
+        try:
+            self._conn.rollback()
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+    def _is_poisoned(self) -> bool:
+        """Report whether the connection is stuck in an aborted transaction.
+
+        A cheap probe: PostgreSQL rejects everything after an error until a
+        rollback clears it, so if this statement fails we are poisoned. Used
+        to recover a connection wedged by anything outside our own try blocks
+        (another thread, an interrupted statement, a killed worker).
+        """
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return False
+        except Exception:
+            return True
+
+    def _run(self, fn):
+        """Run *fn* serially, recovering a poisoned connection first.
+
+        Two layers of defence, because either alone has been observed to fail:
+          1. the lock keeps another thread from interleaving a second
+             transaction onto this connection mid-statement;
+          2. the pre-flight probe clears a transaction that was aborted by
+             something we did not catch, plus one retry after any failure.
+        """
+        with self._lock:
+            if self._is_poisoned():
+                self._rollback()
+            try:
+                return fn()
+            except Exception:
+                self._rollback()
+                return fn()
+
     def _init_schema(self):
-        with self._conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-            """)
-        self._conn.commit()
+        def create():
+            with self._conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        session_id TEXT PRIMARY KEY,
+                        state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+            self._conn.commit()
+
+        self._run(create)
 
     def load(self, session_id: str) -> dict | None:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "SELECT state_json FROM sessions WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
+        def select():
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT state_json FROM sessions WHERE session_id = %s",
+                    (session_id,),
+                )
+                return cur.fetchone()
+
+        row = self._run(select)
         if row is None:
+            # A read-only SELECT opens an implicit transaction under manual
+            # commit; end it so idle-in-transaction sessions do not accumulate.
+            self._rollback()
             return None
         # JSONB returns as dict directly
         return dict(row[0]) if isinstance(row[0], dict) else json.loads(row[0])
 
     def save(self, session_id: str, state: dict):
         state["updated_at"] = _now_iso()
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO sessions (session_id, state_json, updated_at) "
-                "VALUES (%s, %s::jsonb, %s) "
-                "ON CONFLICT (session_id) DO UPDATE SET "
-                "  state_json = EXCLUDED.state_json, "
-                "  updated_at = EXCLUDED.updated_at",
-                (session_id, json.dumps(state, ensure_ascii=False, default=str), state["updated_at"]),
-            )
-        self._conn.commit()
+        payload = json.dumps(state, ensure_ascii=False, default=str)
+
+        def upsert():
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO sessions (session_id, state_json, updated_at) "
+                    "VALUES (%s, %s::jsonb, %s) "
+                    "ON CONFLICT (session_id) DO UPDATE SET "
+                    "  state_json = EXCLUDED.state_json, "
+                    "  updated_at = EXCLUDED.updated_at",
+                    (session_id, payload, state["updated_at"]),
+                )
+            self._conn.commit()
+
+        self._run(upsert)
 
     def close(self):
-        self._conn.close()
+        try:
+            self._conn.close()
+        except Exception:  # pragma: no cover - defensive
+            pass
 
 
 # ── Factory ────────────────────────────────────────────────────────

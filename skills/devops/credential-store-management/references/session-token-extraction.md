@@ -1,5 +1,11 @@
 # Session Token Extraction from Web Service Databases
 
+> **Scope: break-glass only.** Reading a running service's session database violates the
+> default discipline "query live services through their APIs; never touch production DB
+> files." Use this ONLY on your own service, when API auth is genuinely broken and you
+> are restoring access — not as a routine credential path. Prefer legitimate recovery
+> (re-issue token via admin CLI, reset password) whenever one exists.
+
 Some web services store active login sessions in their database. When
 the REST API rejects your credentials (wrong password, expired hash),
 an active session in the DB can be used directly to access the API.
