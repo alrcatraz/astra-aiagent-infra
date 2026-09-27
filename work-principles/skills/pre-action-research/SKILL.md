@@ -2,6 +2,9 @@
 name: pre-action-research
 description: "Mandatory research and index lookup before taking action. When investigation, credentials, preferences, devices, services, or project information is involved, consult documentation, tutorials, and reference indexes before proceeding."
 category: devops
+metadata:
+  hermes:
+    tags: [research, planning, credentials, environment-baseline, discipline]
 version: 1.0.0
 author: alrcatraz
 triggers:
