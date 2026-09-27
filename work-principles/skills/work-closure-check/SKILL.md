@@ -14,8 +14,11 @@ triggers:
   - "收尾"
   - "完成"
   - "验证完"
----
+metadata:
+  hermes:
+    tags: [closure, checklist, hygiene, session-end]
 
+---
 # Work Closure Check
 
 > Enforcement of the closure discipline. When a task transitions from execution to wrap-up, **this skill must be loaded first** to run the systematic checks before notifying the user to confirm success.
@@ -287,3 +290,50 @@ After the checklist is complete, follow this order:
    `astra-sre` 就是真实案例——`pyproject.toml` 是 `0.1.0`，registry 刚改为
    `1.0.0`，被验证脚本抓了个正着）。
 
+
+
+<!-- LIFECYCLE_HOOKS_BEGIN -->
+**Closure lifecycle hooks — auto-generated.** Do not edit manually.
+Run `astra-lifecycle-sync --update` to refresh.
+
+### From execution-framework
+- [🟡] Verify version consistency across registry + local repos
+  *(recommended, trigger: registry.yaml or SKILL.md modified)*
+  ```bash
+  cd $ASTRA_EF_DIR && uv run scripts/sync-routing.py --verify-versions
+  ```
+
+### From work-principles
+- [🔴] 收尾 checklist（凭据扫描 + skill 更新 + 决策记录 + 信息存储）→ 详见 work-principles/skills/work-closure-check
+  *(required, trigger: task wrap-up)*
+
+### From astra-vcs-assist
+- [🔴] Verify all sub-skill symlinks in Hermes discovery path are reachable
+  *(required, trigger: sub-skill added, removed, or repo path changed)*
+  ```bash
+  for d in astra-vcs-assist-gpg-key astra-vcs-assist-git-init astra-vcs-assist-git-dev astra-vcs-assist-git-release astra-vcs-assist-git-sync; do test -L "$HOME/.hermes/skills/vcs/$d" -o -d "$HOME/.hermes/skills/vcs/$d" || echo "MISSING: $d"; done
+
+  ```
+- [🟡] Verify routing.yaml covers every sub-skill directory
+  *(recommended, trigger: routing.yaml or sub-skill SKILL.md modified)*
+  ```bash
+  cd "$HOME/.astra/repos/astra-vcs-assist" && for d in git/skills/*/ gpg/*/; do skill=$(basename "$d"); grep -q "$skill" routing.yaml || echo "UNCOVERED: $skill"; done
+
+  ```
+
+### From astra-sre
+- [🔴] Run health scan to verify device coverage after SRE changes
+  *(required, trigger: devices.yaml or health-scan.py modified)*
+  ```bash
+  cd $ASTRA_SRE_DIR && python3 scripts/health-scan.py --json
+  ```
+- [🟡] Update sre_incidents knowledge base with post-mortem after any repair
+  *(recommended, trigger: any SRE repair or incident occurred)*
+  > Action: `kb_add(kb='sre_incidents', content=..., tags=...)`
+- [🟡] Verify devices.yaml is in sync with infrastructure-device-inventory
+  *(recommended, trigger: devices.yaml modified)*
+  ```bash
+  diff <(python3 scripts/health-scan.py --json) <(cat config/devices.yaml)
+  ```
+
+<!-- LIFECYCLE_HOOKS_END -->
