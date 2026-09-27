@@ -150,11 +150,12 @@ echo "$KP_PASS" | keepassxc-cli show -s <DB.kdbx> "<entry-path>"
 
 Prefer **pykeepass** for bulk/programmatic work — CLI parsing drops custom properties and
 attachments. Helper: `scripts/keepass-query.sh`.
-Headless edit recipe (verified 2026-09-26): run with `~/.hermes/hermes-agent/venv/bin/python`
+Headless edit recipe: run with `~/.hermes/hermes-agent/venv/bin/python`
 (kernel default python lacks pykeepass) → `kp.find_entries(title=..., first=True)` →
 assign `e.password` → `kp.save()`; then REOPEN the db, read back, compare, and live-test
 the credential (e.g. ssh echo ok) before declaring done. `get_entries_by_title` does not
-exist — it is `find_entries(title=)`.
+exist — it is `find_entries(title=)`; the Entry attribute is `e.username`, not
+`userName` (AttributeError).
 
 GPG-YAML backend (archive or primary, depending on deployment):
 
@@ -208,6 +209,11 @@ rm -f /tmp/sudo-job.sh
 6. **Recycle-bin ghosts** — old duplicates sitting in the Recycle Bin still appear in
    some traversals and can resurrect through bidirectional merges; filter by path and
    verify convergence (dry-run shows pull=0 push=0) after any consolidation.
+7. **Never restate a secret's value in a new store when an existing bootstrap variable
+   already holds it.** If the user names a passphrase that equals an already-registered
+   credential ("the classic password"), resolve it from its registered source (e.g.
+   `.env` `SUDO_PASSWORD`) via variable reference — do not echo, log, or copy the literal
+   into commands, files, or replies; process listings and shell history leak it.
 
 ## References
 
