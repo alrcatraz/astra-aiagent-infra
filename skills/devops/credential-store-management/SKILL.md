@@ -230,4 +230,5 @@ rm -f /tmp/sudo-job.sh
 - `references/session-token-extraction.md` — Token/cookie extraction from browsers
 - `references/gpg-credential-edit-workflow.md` — GPG YAML edit cycle (archive/legacy backend)
 - `references/fleet-git-credential-helper.md` — Non-interactive git auth from the vault
+- `references/keepass-declarative-interface.md` — KeePassXC ↔ Guix/Nix boundary: value classes inside one entry, reference-by-path resolver (Pattern A, fleet standard), rejected build-time injection (B), topology-embedding drift rule (C), per-entry schema cheat-sheet, Devices-root duplicate-entry warning, pykeepass read-only recipes
 - `scripts/keepass-query.sh` — KeePass lookup helper
