@@ -217,7 +217,45 @@ rm -f /tmp/sudo-job.sh
 6. **Recycle-bin ghosts** — old duplicates sitting in the Recycle Bin still appear in
    some traversals and can resurrect through bidirectional merges; filter by path and
    verify convergence (dry-run shows pull=0 push=0) after any consolidation.
-7. **Never restate a secret's value in a new store when an existing bootstrap variable
+7. **Sync direction defect: ghost re-pull poisoning (fixed in keepass-sync v2.3).** The
+   original order was *compute pull/push → pull → push → prune*, with the prune set
+   computed BEFORE the pull. A container-only stale duplicate under `Sync/Fleet/Devices/`
+   (pre-subdirectory-layout relic sharing a title with a proper `Devices/<domain>/` entry)
+   therefore got **pulled back locally** every run, and the prune then re-deleted it
+   container-side, leaving local polluted and the cycle primed to repeat. Symptoms:
+   `pull=3` on every run, `push` oscillating, duplicates reappearing after being
+   deleted. Fix: classify suspected ghosts BEFORE building the pull list — a container
+   entry under `Sync/Fleet` whose leaf title already exists locally under a **different**
+   group is a ghost and must never be pulled. Also purge container copies and their
+   recycle-bin corpses (a hard delete, not `delete_entry`). Verify with **three
+   consecutive** `pull/push=0` runs, not one.
+8. **pykeepass attachment pitfalls (cost several iterations to surface):**
+   - `Entry.add_attachment(data, filename)` and `Entry.delete_attachment(att)` are the
+     working pair. `PyKeePass.remove_attachment` does **not** exist.
+   - To duplicate an attachment between entries, **deep-copy the XML node** onto the
+     target `<Entry>` (sibling of `<UUID>`, same `Ref` → same binary id). Do not call
+     `add_attachment` with data you just read from another attachment.
+   - The native shape is `<Entry><Binary><Key>name</Key><Value Ref="2"/></Binary>`:
+     the `<Binary>` nodes are **direct children of `<Entry>`**. `kp.binaries` is a
+     **list** (not a dict) in 4.2.0; indexing it by an int id is what resolves `Ref`.
+     A `<Binary>` incorrectly placed inside an `<Attachments>` container is invisible
+     to `Entry.attachments` even though the XML looks plausible — check
+     `[c.tag for c in entry._element]` when attachments "disappear".
+   - **Do not mint a float/int id** for a new `<Value Ref>`: an inline/non-numeric Ref
+     raises `ValueError: invalid literal for int()` on `.data` and can serialize the
+     private key as text into the XML attribute (a real leak vector). Prefer node copy.
+   - `Entry.path` is a list of strings; `"/".join(e.path)` not `x.name`.
+   - `kp.trash_entry(e)` routes through the recycle bin — recycled Fleet corpses
+     resurrect via merges; for machine-subtree consolidation use a hard delete.
+9. **Verifying a key actually works beats comparing attributes.** For SSH key entries,
+   derive the public key from the stored private key with `ssh-keygen -y -P <pass> -f <tmp>`
+   (write the temp file 0600, delete after) and compare its `ssh-keygen -lf` fingerprint
+   against both the entry's `*_pub` attribute and the live `~/.ssh/authorized_keys` of the
+   target host. Attribute-vs-attribute comparison cannot tell a current key from a
+   superseded generation. In one audit the "tidy-looking" root-level entries held the
+   LIVE keys while the "canonical" domain entries held a stale previous generation —
+   file layout alone would have led to deleting the working keys.
+10. **Never restate a secret's value in a new store when an existing bootstrap variable
    already holds it.** If the user names a passphrase that equals an already-registered
    credential ("the classic password"), resolve it from its registered source (e.g.
    `.env` `SUDO_PASSWORD`) via variable reference — do not echo, log, or copy the literal
