@@ -80,11 +80,14 @@ Agents/<name>         identity docs as attachments; API keys as attrs
 Services/<class>/<svc>  AK/SK pairs as attrs (AccessKeyId_ro etc.), no Password
 ```
 
-Domain note: `Devices/` root duplicates <host-01>/NAS/WRT as flat entries while the
-same titles exist under `Personal/`+`Infra/` subgroups — two records, one truth.
-The Devices-root copies carry only ssh_external_* attrs (deployment status
-tracking); the domain subgroups carry full connectivity. When resolving for a
-declaration, target the **domain subgroup entry**, not the root twin.
+Domain note: **every machine has exactly ONE entry**, under its domain subtree
+(`Devices/Personal/`, `Devices/Infra/`, `Devices/Dad/`). There is no separate
+`Devices/<host>` level — an earlier layout put external-key deployment status in
+root-level twins, which produced duplicate titles, stale mirror values, and a
+sync loop that kept re-creating them. If root-level entries reappear, treat them
+as ghosts: resolve the value from the domain entry (single source of truth) and
+hard-delete the twin plus its recycle-bin corpse. Full account in SKILL.md
+pitfall 7.
 
 ## pykeepass survey recipes (read-only)
 
