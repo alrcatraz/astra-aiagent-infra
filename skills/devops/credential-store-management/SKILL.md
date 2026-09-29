@@ -110,6 +110,14 @@ the user's personal groups so headless sync can scope itself:
 - `Devices/<domain>/` — one entry per device, title `<ABBR> <hostname>`. Login lives in
   UserName/Password; connection paths (ordered by network preference), ports, OS, status
   live in custom attributes; URL = primary DNS name.
+
+**Every machine has exactly ONE entry, under its domain subtree** (`Devices/Personal/`,
+`Devices/Infra/`, `Devices/Dad/`). There is no separate flat `Devices/<host>` level, and
+no category directory holding same-title entries as the domain subgroups: that split is
+the failure mode, not the convention. A machine's external-key deployment status belongs
+**in** its entry alongside its other keys, never in a parallel twin — so if root-level
+same-title entries reappear, treat them as ghosts (pitfall 10) and resolve everything from
+the domain entry.
 - `Agents/` — one entry per agent identity: DID/identity docs as attachments, gateway/API
   keys as attributes, scope notes. **Keys follow the agent, not the runtime program.**
 - `Services/<class>/` — infrastructure services, merged per the field-discipline rule.
@@ -138,6 +146,35 @@ make pull the default direction with push explicitly opted-in and path-scoped.
    （会落进 `.git/config` 明文）；
 4. Frozen fallback archives are **not write targets**; on value divergence, the SSOT
    wins — report it rather than editing the archive.
+
+## Sync topology & semantics (headless KeeShare for <host-01>)
+
+The sync container (`Combined_Sync.kdbx`, on the NAS) is the **first landing point
+for changes made on other devices**; the local db is NOT under a sync root. So:
+**run the sync first, then read** — a credential "missing" locally may already exist
+container-side (pitfall 12).
+
+`~/.hermes/scripts/keepass-sync.sh` (cron every 120m) is a thin wrapper over
+`private/scripts/keepass-sync.py`, which implements a headless KeeShare-equivalent:
+
+- **Match by UUID**, not (group, title) — location-independent, the KeeShare way.
+- **Merge in time order (LWW by `mtime`)**; the loser's state is appended to the
+  winner's history (`Entry.save_history`), never discarded.
+- **Deletion reports, never auto-executes.** Default output lists delete-candidates;
+  `--apply-deletes` is the agent's explicit decision. Rationale: this runs unattended
+  where an irreversible delete has no one to stop it, and interactively where the
+  agent has the context to decide — the script surfaces facts, the agent decides.
+- **Asymmetric scope, deliberately**: pull covers the whole container payload; push
+  is `--push` only and scoped to `Sync/Fleet/**`. The container is a phone-shared
+  path — machine-domain (L0) entries must never reach it.
+
+**Delete candidates must be scoped to the shared subtree.** The container holds only
+the `Sync/` payload while the local db holds the whole `Alrcatraz/` tree (including
+`Recycle Bin/`, `Local/`), so "absent from container" is NOT a delete signal outside
+`Sync/` — treating it as one offers to wipe the local recycle bin.
+
+Reading the PAT/token a user just saved on another device: **never print its value** —
+have the script read it from the container and feed it to the consumer in-process.
 
 ## Reading recipes (KeePassXC backend)
 
@@ -197,69 +234,142 @@ rm -f /tmp/sudo-job.sh
 3. **路径语义**：同名残留（含 Recycle Bin 里刚 rm 的）会让绝对路径 add 报 "Could not create entry"；先 rm 再 add，或临时改名腾位。
 4. **脚本化重铸凭据时，服务端是真相源**：create/rotate 的输出必须当场捕获落库；中途失败的脚本会留下幽灵 AK（本会话 GK0ddacf… 事故：半成品 rotation 脚本自删旧 key 后新 key 未生效，KeePass/AWS profile 全指向不存在的 AK）。改完凭据后跑一次真实签名请求（如 `nix store info --store s3://…`）验证，勿以 CLI 读回为准。
 5. 清理残留：批量试错后 `ls "/Recycle Bin"` 清点并告知后续维护者。
+6. **`show` 的输出长度在 agent 通道里不可信——验证值必须走 XML 导出。** Hermes 的
+   凭据脱敏层会改写 `show`/`show --all -s` 打印出的值（实测：正确 26 字符的 AK 显示为
+   36、64 字符的 SK 显示为 40），据此判定"条目损坏"会得出完全错误的结论，并诱使你
+   "修复"一个本来完好的条目。判定值是否正确只认一条路：`keepassxc-cli export DB >
+   /tmp/x.xml` 后用正则从 XML 取 `<Value>`，再与权威源（服务端 `--show-secret`、创建时
+   落盘的 kv 文件）做**等值**比较。写入后的读回校验同理，不能以 `show` 输出为准。
+7. **`keepassxc-cli 2.7.x` 的 `edit` 不支持自定义 attribute**（只有 username/url/notes/
+   password）。给条目加 attribute 的可行路径是 XML 往返：export → 在目标 `<Entry>` 的
+   **主块**内（`<History>` 之前，否则会写进历史副本）插入
+   `<String><Key>K</Key><Value>V</Value></String>` → `keepassxc-cli import -p` 生成新库
+   （`-p` 后需喂两遍密码，`import` 到已存在文件会拒绝）→ 校验后替换。写前备份 kdbx。
+   主块与历史块的 `<Key>` 序列会重复出现，锚点要选主块内唯一的 attribute；批量改值用
+   `re.sub(..., count=1)` 定向替换，改完数一次 occurrence 总数防误伤。
 
 ## Pitfalls
 
 1. **Bootstrap passphrase is the master key** — if exposed, rotate it AND re-encrypt
    every store it unlocks. Keep real secrets out of skills, memory, and git; reference
    vault entries by title/path and resolve values at runtime.
-2. **Sudo passwords differ per device** — resolve each from its SSOT entry; never assume
+
+2. **Consolidating duplicated entries: settle WHICH copy is live before deleting anything.**
+   When an entry exists in two places with the same title and *different* secret values,
+   file layout is not evidence of seniority — a tidy-looking structural copy can hold the
+   live key while the "canonical" place holds a superseded generation. Concretely: derive
+   each private key with `ssh-keygen -y [-P <pass>] -f <tmp>` (temp file 0600, unlink after;
+   pass `stdin=DEVNULL` and `SSH_ASKPASS=/bin/false` or it blocks forever on the passphrase
+   prompt) and compare its `ssh-keygen -lf` fingerprint against (a) the entry's own `*_pub`
+   attribute and (b) the target host's live `~/.ssh/authorized_keys`. **Attribute-vs-attribute
+   comparison cannot distinguish key generations.** Where entry and live host disagree, the
+   host wins; the vault entry is then migrated, not deleted.
+
+   Order that survives the operation: backup the kdbx (copy + verify sha256) → run a
+   **pre-flight gate that ABORTS** unless every source entry is fully self-consistent
+   (private key derives to the same fingerprint as its own `*_pub` and `*_fp` attrs) →
+   migrate attributes + attachment into the surviving entry → reopen the db and re-verify
+   by derivation, not by attribute equality → only then remove the duplicate (hard delete,
+   see pitfall 9) → sync and confirm convergence. Never delete a duplicate in the same pass
+   that discovers it: you cannot tell a stale copy from the last copy until the keys are
+   derived.
+
+3. **One entry per system, self-sufficient.** The user's standing rule: a single entry
+   holds every fact about that system, so one lookup answers everything (login, all key
+   domains, connection paths, deployment status). Two entries sharing a title is a schema
+   violation however the duplicates differ — fix it rather than documenting it as a quirk.
+   When auditing, look for same-title entries across *any* groups: an empty category
+   directory with same-title entries directly under it is the signature of exactly this
+   split.
+
+4. **Migrate attribute blocks whole.** When copying a related set of attributes into a
+   target entry, verify the *set* arrived complete — a partially migrated block (public key
+   + fingerprint present, deployment status missing) reads as valid on inspection but
+   breaks every consumer expecting the full set. Compare key *sets*, not just the values
+   you happened to check.
+
+5. **Sudo passwords differ per device** — resolve each from its SSOT entry; never assume
    the local fallback applies remotely.
-3. **CLI `add -g` GENERATES a random password** and discards the intended value; after
+6. **CLI `add -g` GENERATES a random password** and discards the intended value; after
    any scripted write, verify values by hash against the source.
-4. **Two-database operations need two passwords** — merge/sync between a main DB and a
+7. **Two-database operations need two passwords** — merge/sync between a main DB and a
    sync container may prompt twice; keepassxc-cli prompt-order bugs silently corrupt
    merges (prefer pykeepass, which takes them as arguments).
-5. **pykeepass gotchas**: `kp.entries` can miss freshly-added rows — iterate
+8. **pykeepass gotchas**: `kp.entries` can miss freshly-added rows — iterate
    `group.entries` via `find_groups(...)`; `Entry.path` is a LIST of strings, not a path
-   string; `add_binary()` returns the binary id int directly; `Group.groups` does not
-   exist (use `.subgroups`).
-6. **Recycle-bin ghosts** — old duplicates sitting in the Recycle Bin still appear in
-   some traversals and can resurrect through bidirectional merges; filter by path and
-   verify convergence (dry-run shows pull=0 push=0) after any consolidation.
-7. **Sync direction defect: ghost re-pull poisoning (fixed in keepass-sync v2.3).** The
-   original order was *compute pull/push → pull → push → prune*, with the prune set
-   computed BEFORE the pull. A container-only stale duplicate under `Sync/Fleet/Devices/`
-   (pre-subdirectory-layout relic sharing a title with a proper `Devices/<domain>/` entry)
-   therefore got **pulled back locally** every run, and the prune then re-deleted it
-   container-side, leaving local polluted and the cycle primed to repeat. Symptoms:
-   `pull=3` on every run, `push` oscillating, duplicates reappearing after being
-   deleted. Fix: classify suspected ghosts BEFORE building the pull list — a container
-   entry under `Sync/Fleet` whose leaf title already exists locally under a **different**
-   group is a ghost and must never be pulled. Also purge container copies and their
-   recycle-bin corpses (a hard delete, not `delete_entry`). Verify with **three
-   consecutive** `pull/push=0` runs, not one.
-8. **pykeepass attachment pitfalls (cost several iterations to surface):**
-   - `Entry.add_attachment(data, filename)` and `Entry.delete_attachment(att)` are the
-     working pair. `PyKeePass.remove_attachment` does **not** exist.
+   string; `add_binary()` returns the binary **id int** (see pitfall 13 for the mandatory
+   second step); `Group.groups` does not exist (use `.subgroups`).
+9. **Recycle-bin ghosts** — old duplicates sitting in the Recycle Bin still appear in
+   some traversals and can resurrect through bidirectional merges. **Delete duplicates
+   with a hard delete, never `trash_entry`** — a recycled entry is resurrected by the next
+   merge, so the "delete" silently undoes itself.
+10. **Sync is computed before it is applied — ghost re-pull poisoning.** When a sync
+   script builds its pull list, then pulls, then prunes container-side ghosts, a
+   container-only duplicate gets **pulled back locally** every run while the prune
+   deletes it container-side: local stays polluted and the cycle repeats. Symptoms:
+   `pull=N` on every identical run, push oscillating, duplicates reappearing after
+   deletion. Fix: classify suspected ghosts *before* building the pull list — a scoped
+   container entry whose leaf title already exists locally under a **different** group is
+   a ghost and must never be pulled. Prove a sync fix with **three consecutive**
+   `pull=0 push=0` runs, not one; a single clean run is exactly what this bug produces.
+11. **Sync returning `exit 0` with `pull=0` is not proof of convergence.** When the
+   local db is stale (mtime older than container) and the container has entries the
+   local copy lacks, a sync script that reports `pull=0 push=0` has **failed silently**
+   — the pull list computation returned empty even though the delta is non-zero.
+   Always verify convergence by opening both dbs and comparing entry counts and
+   target entry presence, not by trusting exit code alone. If the delta is real and
+   the script reports 0, the script's pull-list logic has a bug — do not declare
+   sync complete.
+12. **PATs and tokens in human-domain entries live in the sync container first.**
+   When a credential was just added on another device, the local db copy (typically
+   `~/Documents/KeePassXC/Combined.kdbx`, **not** under a sync root) will not have it
+   until a successful pull from the sync container. Check the container directly
+   (read-only via pykeepass with the container's own password) to confirm the entry
+   exists before concluding it is missing.
+13. **pykeepass attachment pitfalls:**
+   - **The attachment API is TWO steps in 4.2.0, and the obvious call leaks the secret as
+     plaintext.** The signature is `Entry.add_attachment(id, filename)` where `id` is an
+     **integer** index into the binary pool — NOT the data. Calling
+     `add_attachment(sec_bytes, "key.sec")` stores the data string verbatim into the
+     entry's `<Binary><Value Ref="...">` attribute, so the private key becomes readable in
+     the kdbx XML and every later read raises `ValueError: invalid literal for int()`.
+     Correct sequence:
+     ```python
+     bid = kp.add_binary(sec_bytes)          # -> int; add_binary(data, compressed=True, protected=True)
+     entry.add_attachment(bid, "key.sec")    # reference by id
+     ```
+     Verify by reopening and asserting **both** `att.data == expected_bytes` **and** no
+     plaintext marker survives in the entry XML (`"private-key" not in entry._element.xml`)
+     — a length check alone does not prove `Ref` holds an integer. To repair an entry
+     already poisoned, strip every `<Binary>` child of the entry element, `kp.save()`,
+     reopen, then re-add with the two-step sequence above.
+   - `Entry.delete_attachment(att)` works. `PyKeePass.remove_attachment` does **not** exist.
+   - The native shape is `<Entry><Binary><Key>name</Key><Value Ref="2"/></Binary>` — the
+     `<Binary>` nodes are **direct children of `<Entry>`**. `kp.binaries` is a **list** in
+     4.2.0, indexed by the int in `Ref`. A `<Binary>` placed inside an `<Attachments>`
+     container is invisible to `Entry.attachments` even though the XML looks plausible —
+     when attachments "disappear", print `[c.tag for c in entry._element]`.
    - To duplicate an attachment between entries, **deep-copy the XML node** onto the
-     target `<Entry>` (sibling of `<UUID>`, same `Ref` → same binary id). Do not call
-     `add_attachment` with data you just read from another attachment.
-   - The native shape is `<Entry><Binary><Key>name</Key><Value Ref="2"/></Binary>`:
-     the `<Binary>` nodes are **direct children of `<Entry>`**. `kp.binaries` is a
-     **list** (not a dict) in 4.2.0; indexing it by an int id is what resolves `Ref`.
-     A `<Binary>` incorrectly placed inside an `<Attachments>` container is invisible
-     to `Entry.attachments` even though the XML looks plausible — check
-     `[c.tag for c in entry._element]` when attachments "disappear".
-   - **Do not mint a float/int id** for a new `<Value Ref>`: an inline/non-numeric Ref
-     raises `ValueError: invalid literal for int()` on `.data` and can serialize the
-     private key as text into the XML attribute (a real leak vector). Prefer node copy.
-   - `Entry.path` is a list of strings; `"/".join(e.path)` not `x.name`.
-   - `kp.trash_entry(e)` routes through the recycle bin — recycled Fleet corpses
-     resurrect via merges; for machine-subtree consolidation use a hard delete.
-9. **Verifying a key actually works beats comparing attributes.** For SSH key entries,
-   derive the public key from the stored private key with `ssh-keygen -y -P <pass> -f <tmp>`
-   (write the temp file 0600, delete after) and compare its `ssh-keygen -lf` fingerprint
-   against both the entry's `*_pub` attribute and the live `~/.ssh/authorized_keys` of the
-   target host. Attribute-vs-attribute comparison cannot tell a current key from a
-   superseded generation. In one audit the "tidy-looking" root-level entries held the
-   LIVE keys while the "canonical" domain entries held a stale previous generation —
-   file layout alone would have led to deleting the working keys.
-10. **Never restate a secret's value in a new store when an existing bootstrap variable
+     target `<Entry>`, keeping its `Ref` so it points at the same binary. Do not re-add
+     data you just read back — see the first bullet above for why that lands the raw
+     private key in the XML.
+   - `kp.trash_entry(e)` routes through the recycle bin (see pitfall 9).
+14. **Never restate a secret's value in a new store when an existing bootstrap variable
    already holds it.** If the user names a passphrase that equals an already-registered
    credential ("the classic password"), resolve it from its registered source (e.g.
    `.env` `SUDO_PASSWORD`) via variable reference — do not echo, log, or copy the literal
    into commands, files, or replies; process listings and shell history leak it.
+15. **`Entry.save_history()` must run on the target entry, before the overwrite.** It
+   deep-archives `self._element`; calling it on a detached clone raises `'NoneType'
+   object has no attribute '_encode_time'`, the history write is skipped, and the losing
+   side's state is silently destroyed while the merge appears to succeed. If the history
+   call throws, treat the merge as unsafe — surface it rather than proceeding. Order is
+   `le.save_history()` → then mutate fields.
+16. **UUID match does not lift the per-group title-uniqueness constraint.** Two dbs can
+   hold the same title under different UUIDs; `add_entry` then raises
+   `An entry "<title>" already exists in "<group>"` and aborts the run mid-batch. Index
+   local entries by `(group_path, title)` before adding and LWW-merge on a hit instead of
+   duplicating.
 
 ## References
 
@@ -268,5 +378,5 @@ rm -f /tmp/sudo-job.sh
 - `references/session-token-extraction.md` — Token/cookie extraction from browsers
 - `references/gpg-credential-edit-workflow.md` — GPG YAML edit cycle (archive/legacy backend)
 - `references/fleet-git-credential-helper.md` — Non-interactive git auth from the vault
-- `references/keepass-declarative-interface.md` — KeePassXC ↔ Guix/Nix boundary: value classes inside one entry, reference-by-path resolver (Pattern A, fleet standard), rejected build-time injection (B), topology-embedding drift rule (C), per-entry schema cheat-sheet, Devices-root duplicate-entry warning, pykeepass read-only recipes
+- `references/keepass-declarative-interface.md` — KeePassXC ↔ Guix/Nix boundary: value classes inside one entry, reference-by-path resolver (Pattern A, fleet standard), rejected build-time injection (B), topology-embedding drift rule (C), per-entry schema cheat-sheet, pykeepass read-only recipes
 - `scripts/keepass-query.sh` — KeePass lookup helper
