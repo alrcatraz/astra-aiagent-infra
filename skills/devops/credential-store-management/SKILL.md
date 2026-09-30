@@ -406,6 +406,23 @@ rm -f /tmp/sudo-job.sh
    (or use it as LWW evidence of recency) without checking whether the timestamps are
    identical.
 
+21. **Existence checks must match the attribute that carries the credential, never a
+   fuzzy title substring.** A PAT lives in a *custom attribute* of a service entry
+   (`Gitea - <nas-host>` → `angelia-gitea-pat-full-access`). Searching by
+   `'Gitea <gitea-host>' in e.title` returns **zero** while the credential sits intact, because
+   that string belongs to old schema-violating duplicates, not the canonical entry. The
+   resulting "the credential is gone" alarm is self-inflicted. Correct probe: iterate
+   entries and test `custom_properties` keys for the exact attribute name, then live-test
+   the endpoint. Cross-check BOTH dbs before declaring anything missing (pitfall 12).
+
+22. **`Entry.path` has NO leading slash — `startswith('/Sync/')` matches nothing.** It is
+   a list of group names; join it (`'/'.join(e.path)`) and compare against `'Sync/'`,
+   `'Recycle Bin/'`. Measured consequence: a scope audit reported `Sync/** = 0` when the
+   true count was 673, which reads as "the database structure changed" and sends you
+   diagnosing a nonexistent incident. Same class of bug as pitfall 8's list-vs-string
+   confusion — always sanity-check a zero result against an expected non-zero baseline
+   before believing it.
+
 ## References
 
 - `references/ssh-key-domain-model.md` — SSH fleet/kin/external key domains, vault placement, config block
