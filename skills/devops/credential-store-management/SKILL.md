@@ -393,6 +393,16 @@ rm -f /tmp/sudo-job.sh
    verify reuses the same object graph and reports false success (a `plan` dict keyed
    by `id(entry)` is likewise invalidated by pykeepass re-wrapping entries per
    iteration: key by `str(uuid)` instead).
+   ⚠️ **Exception — schema-violating duplicates get hard-deleted, not relinked.**
+   One entry per system is the rule; when a second entry with a *different title*
+   duplicates the same system's role (a stray `SomeTool (PAT …)` beside the canonical
+   `SomeTool - <system>` entry), relinking would merge two roles into one identity.
+   Fold any unique attributes into the keeper entry first, then remove every copy
+   including recycle-bin corpses — `find_entries(title=…, first=False)` returns
+   live AND binned entries in one pass; `parent._element.remove(e._element)` for
+   each (hard delete, never `trash_entry`). Verify in a fresh process: the duplicate
+   count is 0 AND the keeper still carries the full attribute set. Corpses left
+   behind resurrect on the next sync (pitfall 9) and multiply.
 18. **"Content identical" must include attachments and attribute *values*, not counts.**
    Two entries with equal username/password/url and the same attribute-key set can still
    differ in what matters — one carries a signing private key the other lacks. Compare
@@ -405,6 +415,18 @@ rm -f /tmp/sudo-job.sh
    sync/KeeShare import wrote them together — do not treat each as a fresh human edit
    (or use it as LWW evidence of recency) without checking whether the timestamps are
    identical.
+
+20. **An entry's Password may be EMPTY while a naive XML read prints a plausible value.**
+   An empty protected value renders as the self-closing tag `<Value
+   ProtectInMemory="True"/>`; a regex of the form
+   `<Key>Password</Key><Value[^>]*>(.*?)</Value>` then captures content lying AFTER
+   that tag (a later element's body) and reports a fake nonzero length. Detect
+   emptiness from the tag itself: the element matches `<Value[^>]*/>` (self-closing)
+   or `><` (empty pair). A self-closing protected value is the signature of pitfall 1
+   (`add` without `-p`) or of a sync container that never carried the value. The XML
+   round-trip remains the value-check path (KeePassXC CLI section) — this pitfall is
+   about reading that XML correctly; never infer credential validity from `show`
+   output alone, live-test the endpoint.
 
 21. **Existence checks must match the attribute that carries the credential, never a
    fuzzy title substring.** A PAT lives in a *custom attribute* of a service entry
