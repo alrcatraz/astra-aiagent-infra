@@ -165,8 +165,18 @@ container-side (pitfall 12).
   where an irreversible delete has no one to stop it, and interactively where the
   agent has the context to decide — the script surfaces facts, the agent decides.
 - **Asymmetric scope, deliberately**: pull covers the whole container payload; push
-  is `--push` only and scoped to `Sync/Fleet/**`. The container is a phone-shared
-  path — machine-domain (L0) entries must never reach it.
+  is scoped to `Sync/**` (the whole KeeShare payload), both directions ON by default
+  and applied as ONE transaction — this script is this box's KeeShare, so a split
+  pull/push (or a scope mismatch) can never converge. The phone-shared container still
+  must never receive machine-domain (L0) entries, which live outside `Sync/`.
+- **Same-title / different-UUID pairs are ONE entry with a forked identity, never two
+  entries.** Unify them with **relink** — set the local entry's `uuid` to the container's
+  UUID (or vice versa) so both sides match 1:1 — and never by deleting either copy:
+  both copies are real (often one copy carries an attachment the other lacks, e.g. a
+  signing key), and deleting silently drops credentials from one db. Decide which
+  identity wins first, then relink, then re-verify by reopening both dbs in a fresh
+  process. If content actually differs (different keys/URLs), stop and surface it for
+  the user to adjudicate — do not LWW it away.
 
 **Delete candidates must be scoped to the shared subtree.** The container holds only
 the `Sync/` payload while the local db holds the whole `Alrcatraz/` tree (including
@@ -369,7 +379,32 @@ rm -f /tmp/sudo-job.sh
    hold the same title under different UUIDs; `add_entry` then raises
    `An entry "<title>" already exists in "<group>"` and aborts the run mid-batch. Index
    local entries by `(group_path, title)` before adding and LWW-merge on a hit instead of
-   duplicating.
+   duplicating. Handle it on BOTH sides — a twin-fallback added only to the pull side
+   still blows up on push (`An entry ... already exists`) the moment a matching sibling
+   exists container-side.
+17. **Never "unify" same-title twins by deleting one copy — relink the UUID instead.**
+   Deleting the local copy to "keep the container identity" removes the credential from
+   the local db while the container copy keeps its own UUID, so the local entry's
+   fields/attachments are simply gone (<host-01>/NAS/WRT SSH private keys were lost this way
+   and only recovered from a pre-write backup). The correct move is
+   `e.uuid = UUID(container_uuid)` + `kp.save()`, which preserves every field, attachment
+   and the history of the local entry while making the two sides match 1:1. Always take
+   a backup copy first and re-open the db in a NEW process to verify — an in-process
+   verify reuses the same object graph and reports false success (a `plan` dict keyed
+   by `id(entry)` is likewise invalidated by pykeepass re-wrapping entries per
+   iteration: key by `str(uuid)` instead).
+18. **"Content identical" must include attachments and attribute *values*, not counts.**
+   Two entries with equal username/password/url and the same attribute-key set can still
+   differ in what matters — one carries a signing private key the other lacks. Compare
+   `tuple(sorted(a.filename for a in e.attachments))` and the full custom-properties
+   items, and when they differ, report the field-level diff to the user instead of
+   auto-merging; the entry missing an attachment is usually the incomplete one, not the
+   stale one.
+19. **Same-`mtime` on many unrelated entries is a fingerprint of a bulk merge, not of
+   independent edits.** Several entries all carrying the same timestamp means a single
+   sync/KeeShare import wrote them together — do not treat each as a fresh human edit
+   (or use it as LWW evidence of recency) without checking whether the timestamps are
+   identical.
 
 ## References
 
