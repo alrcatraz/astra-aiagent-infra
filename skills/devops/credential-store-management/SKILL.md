@@ -190,6 +190,14 @@ rm -f /tmp/sudo-job.sh
    password. `SUDO_ASKPASS` is also blocked (terminal forces `-S`). On remote hosts wrap
    inner commands in `sh -c '...'` inside the script to survive SSH quoting.
 
+## KeePassXC CLI 写入/读取陷阱（keepassxc-cli 2.7.x，实测于 <host-01>）
+
+1. **`add -p` 必须显式带 `-p`**：不带 `-p` 时 stdin 第二行被当噪音丢弃、条目密码落成空——这就是历史多条 9 位截断条目（Garage nix-ro/nix-rw、Gitea PAT）的成因。正确写法：`printf '%s\n%s\n' "$DB_PASS" "$ENTRY_PW" | keepassxc-cli add <kdbx> "<绝对路径>" -u <user> -p --url ... --notes ...`。
+2. **读回核验用 `show -a Password`**（输出裸值）；普通 `show` 打 `***`，`show -s` 在本版本反而打空。写后必做 len+等值比对，别信 add 的 "Successfully added"。
+3. **路径语义**：同名残留（含 Recycle Bin 里刚 rm 的）会让绝对路径 add 报 "Could not create entry"；先 rm 再 add，或临时改名腾位。
+4. **脚本化重铸凭据时，服务端是真相源**：create/rotate 的输出必须当场捕获落库；中途失败的脚本会留下幽灵 AK（本会话 GK0ddacf… 事故：半成品 rotation 脚本自删旧 key 后新 key 未生效，KeePass/AWS profile 全指向不存在的 AK）。改完凭据后跑一次真实签名请求（如 `nix store info --store s3://…`）验证，勿以 CLI 读回为准。
+5. 清理残留：批量试错后 `ls "/Recycle Bin"` 清点并告知后续维护者。
+
 ## Pitfalls
 
 1. **Bootstrap passphrase is the master key** — if exposed, rotate it AND re-encrypt

@@ -28,7 +28,13 @@ key set (deliberate duplication — restoring any OS needs no topology lookup).
 |:-------|:----------|:-----------|:-------|
 | `fleet` | one global key shared by all owned machines | **none** | unattended SSH handshakes (e.g. desktop app → agent) are a hard dependency; authorized_keys everywhere under our control |
 | `kin` | one global key | none | environments of trusted persons; low, self-maintainable blast radius |
-| `external` | **per-physical-machine keys** | bcrypt passphrase, stored in the entry | hostile territory (rented GPUs, shared lab servers): a compromise is revoked single-entry, no blast radius |
+| `external` | **one key per physical machine** (all OS entries of that hardware carry the same copy) | passphrase stored in the entry | hostile territory (rented GPUs, shared lab servers): a compromise is revoked single-entry, no blast radius |
+
+Physical-machine granularity for external: dual-boot / multi-OS machines (e.g. a laptop
+running Linux + Windows) get ONE external key shared across their system entries —
+restoring any OS needs no re-enrollment anywhere the key was ever authorized. Entries
+carry `ssh_external_status` (`deployed` / `pending-deploy <reason>` / `vaulted-only`)
+so offline machines can be pre-provisioned in the vault and landed when next online.
 
 Public-key comments follow `<domain>-<machine>` so any authorized_keys line
 self-documents its domain and origin.
@@ -82,6 +88,19 @@ Host <abbr> <hostname> <hostname>.<internal-domain>
 - pykeepass 4.x attachment API: `kp.add_binary(data)` returns a binary id;
   `entry.add_attachment(id, filename=...)` (filename positional-required, the stored
   name); `add_binary` accepts no filename kwarg.
+- Editing custom attributes headlessly: use `e.set_custom_property(name, value)` then
+  `kp.save()` — plain dict assignment (`e.custom_properties[k]=v`) does NOT touch the
+  XML and is silently lost on save. Verify by REOPENING the kdbx and reading back.
+- Fingerprint truth: compare against the canonical OpenSSH form —
+  `SHA256:` + b64(sha256(base64decode(pubkey_b64))), trailing `=` stripped. `ssh-keygen -y`
+  output piped through `sha256sum` yields a hex digest, not the vault fp; identical
+  base64 key material means the same key regardless of how the digest was computed.
+- Deploying an external key to a machine that is offline at rollout: relay the PEM over a
+  reachable fleet host in the same overlay (`ssh relay 'umask 077; echo <b64> | tr -d
+  "\n" | base64 -d > ~/.ssh/id_ed25519_external'). Quote the base64 body as a single arg —
+  inline content mangling shows up as an empty file (md5 d41d8cd9…). Verify with
+  `md5sum` against the vault attachment AND `ssh-keygen -y -P <passphrase>` unlocking,
+  before flipping `ssh_external_status` to deployed.
 - **Deletion semantics in vault-sync scripts**: `kp.delete_entry()` moves the entry to
   the recycle bin, and recycled Fleet corpses resurrect through bidirectional merges —
   hard-delete via `el._element.getparent().remove(el)` and purge matching recycle-bin
