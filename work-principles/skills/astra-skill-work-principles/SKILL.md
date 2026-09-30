@@ -131,11 +131,20 @@ drops the stack.
 
 ### Session isolation
 
-Every hook receives `session_id=agent.session_id` from Hermes and threads
-it through all state operations.  State files are per-session
-(`state_{session_id}.json`); the process-global `HERMES_SESSION_ID` env
-var is only a fallback for session-less callers (e.g. cron) and is never
-used for isolation.
+Hooks receive `session_id` from Hermes **and thread it through state
+operations — but NOT on every path.** The `execute_code` kernel is a
+scrubbed child process that carries only `task_id`, no `session_id`
+(`_build_child_env` scrubs `HERMES_SESSION_ID`; `code_kernel` passes only
+`task_id`), so hooks invoked from inside `execute_code` get an empty
+`session_id`. The plugin must treat that as an explicit "unresolved" state —
+**never** silently fall back to `no_task` (which misreads it as an idle
+session and wrongly blocks the agent), and never substitute `task_id` for
+`session_id` (they are distinct: `task_id` defaults to a random UUID when
+unset, so it is not a reliable session key). Full diagnosis and fix guidance:
+`discipline-zone-access` §「会话 id 缺失」. State files are per-session
+(`state_{session_id}.json`); the process-global `HERMES_SESSION_ID` env var
+is only a fallback for session-less callers (e.g. cron) and is never used
+for isolation.
 
 ### Tool-triggered auto-skill loading
 
