@@ -46,6 +46,13 @@ Also triggered by: 部署、安装服务、启动服务、注册服务、配置�
 - [ ] **是否有旧版本、旧进程或旧配置需要清理？**
 - [ ] **部署过程中是否产生了临时文件？** 清理了吗？
 - [ ] **如果将来移除这个服务，需要清理什么？** 数据库记录、检查脚本、引用文档。
+- [ ] **部署形态已登记，且按形态做了对应的完整性检查？**
+  - 先判定该资产的形态（inventory 的 `references/deployment-forms.md`），再按该形态的
+    checklist 走——不是所有资产都走 symlink 桥
+  - 链接桥接型：**双向 + 可用性** 三查（每个组件有链接 / 每个链接解析到生产副本 /
+    链接名=注册名可被加载），`missing=0 且 broken=0 且 stale=0` 才算完成
+  - 链接全对 ≠ 技能可用：只验证"存在的链接是活的"会漏掉整批未注册的组件，
+    必须用生产副本的组件全集做分母（正向枚举），不能以链接集为分母
 
 
 
@@ -65,17 +72,25 @@ Run `astra-lifecycle-sync --update` to refresh.
   ```
 
 ### From astra-vcs-assist
-- [🔴] Register all sub-skill symlinks in Hermes discovery path
-  *(required, trigger: new clone or first deploy of vcs-assist)*
+- [🔴] Register every sub-skill symlink in Hermes discovery path
+  *(required, trigger: new clone, deploy, or update of vcs-assist)*
   ```bash
-  mkdir -p "$HOME/.hermes/skills/vcs" && ln -sfn "$HOME/.astra/repos/astra-vcs-assist" "$HOME/.hermes/skills/vcs/astra-vcs-assist" && for d in gpg/astra-vcs-assist-gpg-key git/skills/astra-vcs-assist-git-init git/skills/astra-vcs-assist-git-dev git/skills/astra-vcs-assist-git-release git/skills/astra-vcs-assist-git-sync; do ln -sfn "$HOME/.astra/repos/astra-vcs-assist/$d" "$HOME/.hermes/skills/vcs/$(basename $d)"; done
-
+  REPO="$HOME/.astra/repos/astra-vcs-assist"; DEST="$HOME/.hermes/skills/vcs"; mkdir -p "$DEST"
+  find "$REPO" -name SKILL.md -not -path '*/.git/*' -printf '%h\n' | sort | while read -r d; do
+    ln -sfn "$d" "$DEST/$(basename "$d")"
+  done
   ```
-- [🔴] Verify all sub-skill SKILL.md files exist
+  Enumerate from the repo (`find … SKILL.md`), never a hand-written list — a
+  hard-coded list silently drops sub-skills added later.
+- [🔴] Verify every sub-skill is exposed and loadable
   *(required, trigger: deploy or update of vcs-assist)*
   ```bash
-  for f in SKILL.md gpg/astra-vcs-assist-gpg-key/SKILL.md git/skills/astra-vcs-assist-git-init/SKILL.md git/skills/astra-vcs-assist-git-dev/SKILL.md git/skills/astra-vcs-assist-git-release/SKILL.md git/skills/astra-vcs-assist-git-sync/SKILL.md; do test -f "$HOME/.astra/repos/astra-vcs-assist/$f" || echo "MISSING: $f"; done
-
+  REPO="$HOME/.astra/repos/astra-vcs-assist"; DEST="$HOME/.hermes/skills/vcs"; miss=0
+  while read -r md; do
+    n=$(basename "$(dirname "$md")")
+    [ -L "$DEST/$n" ] && [ -f "$DEST/$n/SKILL.md" ] || { echo "MISSING: $n"; miss=$((miss+1)); }
+  done < <(find "$REPO" -name SKILL.md -not -path '*/.git/*')
+  echo "missing=$miss (0 = complete)"
   ```
 
 ### From astra-sre
