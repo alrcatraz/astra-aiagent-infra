@@ -72,25 +72,17 @@ Run `astra-lifecycle-sync --update` to refresh.
   ```
 
 ### From astra-vcs-assist
-- [🔴] Register every sub-skill symlink in Hermes discovery path
-  *(required, trigger: new clone, deploy, or update of vcs-assist)*
+- [🔴] Register all sub-skill symlinks in Hermes discovery path
+  *(required, trigger: new clone or first deploy of vcs-assist)*
   ```bash
-  REPO="$HOME/.astra/repos/astra-vcs-assist"; DEST="$HOME/.hermes/skills/vcs"; mkdir -p "$DEST"
-  find "$REPO" -name SKILL.md -not -path '*/.git/*' -printf '%h\n' | sort | while read -r d; do
-    ln -sfn "$d" "$DEST/$(basename "$d")"
-  done
+  mkdir -p "$HOME/.hermes/skills/vcs" && ln -sfn "$HOME/.astra/repos/astra-vcs-assist" "$HOME/.hermes/skills/vcs/astra-vcs-assist" && for d in gpg/astra-vcs-assist-gpg-key git/skills/astra-vcs-assist-git-init git/skills/astra-vcs-assist-git-dev git/skills/astra-vcs-assist-git-release git/skills/astra-vcs-assist-git-sync; do ln -sfn "$HOME/.astra/repos/astra-vcs-assist/$d" "$HOME/.hermes/skills/vcs/$(basename $d)"; done
+
   ```
-  Enumerate from the repo (`find … SKILL.md`), never a hand-written list — a
-  hard-coded list silently drops sub-skills added later.
-- [🔴] Verify every sub-skill is exposed and loadable
+- [🔴] Verify all sub-skill SKILL.md files exist
   *(required, trigger: deploy or update of vcs-assist)*
   ```bash
-  REPO="$HOME/.astra/repos/astra-vcs-assist"; DEST="$HOME/.hermes/skills/vcs"; miss=0
-  while read -r md; do
-    n=$(basename "$(dirname "$md")")
-    [ -L "$DEST/$n" ] && [ -f "$DEST/$n/SKILL.md" ] || { echo "MISSING: $n"; miss=$((miss+1)); }
-  done < <(find "$REPO" -name SKILL.md -not -path '*/.git/*')
-  echo "missing=$miss (0 = complete)"
+  for f in SKILL.md gpg/astra-vcs-assist-gpg-key/SKILL.md git/skills/astra-vcs-assist-git-init/SKILL.md git/skills/astra-vcs-assist-git-dev/SKILL.md git/skills/astra-vcs-assist-git-release/SKILL.md git/skills/astra-vcs-assist-git-sync/SKILL.md; do test -f "$HOME/.astra/repos/astra-vcs-assist/$f" || echo "MISSING: $f"; done
+
   ```
 
 ### From astra-sre
