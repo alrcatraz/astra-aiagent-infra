@@ -132,7 +132,6 @@ If none → proceed.
 此阶段由 agent 根据自身可用工具动态执行。
 
 **记录什么 → 记到哪里** → 完整决策树及层级说明见 `astra-hub` skill 的「🗂️ 信息存储层级」章节。
-本地存储实例配置（KB 空间名、凭证路径等）见 `astra-hub/references/user-stores.md`。
 
 > 快速摘要：流程→skill，配置→KB，偏好→Fact Store，环境事实→MEMORY，临时→不存。
 
