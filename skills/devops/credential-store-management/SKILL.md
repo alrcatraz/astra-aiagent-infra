@@ -461,7 +461,7 @@ rm -f /tmp/sudo-job.sh
 17. **Never "unify" same-title twins by deleting one copy — relink the UUID instead.**
    Deleting the local copy to "keep the container identity" removes the credential from
    the local db while the container copy keeps its own UUID, so the local entry's
-   fields/attachments are simply gone (<host-01>/NAS/WRT SSH private keys were lost this way
+   fields/attachments are simply gone (<host-01>/<nas-host>/<router-host> SSH private keys were lost this way
    and only recovered from a pre-write backup). The correct move is
    `e.uuid = UUID(container_uuid)` + `kp.save()`, which preserves every field, attachment
    and the history of the local entry while making the two sides match 1:1. Always take
@@ -506,7 +506,7 @@ rm -f /tmp/sudo-job.sh
 
 21. **Existence checks must match the attribute that carries the credential, never a
    fuzzy title substring.** A PAT lives in a *custom attribute* of a service entry
-   (`Gitea - <nas-host>` → `angelia-gitea-pat-full-access`). Searching by
+   (`Gitea - <nas-host>` → `<pat-attribute>`). Searching by
    `'Gitea <gitea-host>' in e.title` returns **zero** while the credential sits intact, because
    that string belongs to old schema-violating duplicates, not the canonical entry. The
    resulting "the credential is gone" alarm is self-inflicted. Correct probe: iterate
