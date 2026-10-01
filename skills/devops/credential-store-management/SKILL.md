@@ -563,6 +563,16 @@ rm -f /tmp/sudo-job.sh
    Ordering note: check the sync cron's schedule before writing `Sync/**` at all; a write
    landing inside the cron's window will be merged by it mid-flight.
 
+25. **Never dump the environment in a shell that holds credentials.** `env`, `set` and
+   `printenv` print every variable at once; in an agent session that output goes straight
+   into the conversation transcript, where the redaction layer masks only some of them.
+   `export $(…)` is the sneaky variant of the same mistake: when the substitution expands
+   to nothing, a bare `export` falls back to listing the whole environment — and when it
+   does expand, the command's output is parsed as export arguments, so value fragments
+   surface in word-splitting errors instead. Read the single variable you need by name
+   (`references/env-variable-extraction.md`) or parse a config file for one key; never
+   echo a whole environment block to check whether something is set.
+
 ## References
 
 - `references/ssh-key-domain-model.md` — SSH fleet/kin/external key domains, vault placement, config block
