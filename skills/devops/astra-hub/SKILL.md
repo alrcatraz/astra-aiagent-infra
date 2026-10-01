@@ -295,7 +295,6 @@ targets (addresses, keys) resolve via the GPG credential store
 
 | 决策 | 要点 | 详情 |
 |:----|:-----|:-----|
-| 存储/业务分层 + KB 定位定案 (2026-09) | 存储类(PG/S3/valkey)集中 NAS 做"数据原语"；业务计算类无状态化+状态外置；软路由永不参与；共享 DB 走最小 platform 栈(B)、排除自建 DBaaS(C)；KB 记忆库=私有海马体非共享数据，共享的是四座策展库(hermes_config/service_mgmt/sre_incidents/dynamic_ref)；迁移行动清单见文末文件第七节 | `references/storage-compute-layering.md`（做任何迁移/新建有状态服务决策前先读） |
 
 ## ⚠️ 坑与教训
 
