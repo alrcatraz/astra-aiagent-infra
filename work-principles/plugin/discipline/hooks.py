@@ -54,10 +54,42 @@ from .state import (
 logger = logging.getLogger("work-principles")
 
 
+# ── Session resolution: persistent task→session observation ────────────
+# Hermes drops ``session_id`` for tool calls that originate inside the
+# execute_code kernel (code_kernel → handle_function_call passes only
+# ``task_id``). The kernel child is deliberately scrubbed of session env, so
+# the session cannot be recovered from inside it. But every hook still carries
+# ``task_id``, and any hook that DOES carry a session_id lets us observe the
+# (task_id → session_id) binding once. We keep that observation continuously
+# — each hook updates it — so a later session-less call can resolve its
+# session by ``task_id`` instead of being misread as ``no_task``.
+#
+# Keyed by ``task_id``: verified unique across concurrent sessions (CLI and
+# cron each carry a distinct task_id), so lookups never cross sessions. A miss
+# resolves to None → the caller falls back to fail-closed gating, which is the
+# safe direction (deny with guidance, never wrong-pass).
+_TASK_SESSION_MAP: dict[str, str] = {}
+
+
 def _session_from_kwargs(kwargs: dict) -> str | None:
-    """Extract the per-session id Hermes injects into hook kwargs."""
+    """Resolve this call's session id, observing the task→session binding.
+
+    Order of truth:
+    1. A non-empty ``session_id``/``session`` is authoritative — return it and
+       record the binding so session-less calls for the same task can follow.
+    2. Otherwise (kernel path) look the call's ``task_id`` up in the observed
+       map — the session was seen earlier for this task.
+    3. Otherwise None (unresolvable); the caller fails closed with guidance.
+    """
     sid = kwargs.get("session_id") or kwargs.get("session") or ""
-    return str(sid) or None
+    sid = str(sid) or None
+    task_id = str(kwargs.get("task_id") or "")
+    if sid and task_id:
+        _TASK_SESSION_MAP[task_id] = sid
+        return sid
+    if not sid and task_id:
+        return _TASK_SESSION_MAP.get(task_id)
+    return sid
 
 
 # ── Gate audit logging ──────────────────────────────────────────────────
