@@ -147,6 +147,23 @@ make pull the default direction with push explicitly opted-in and path-scoped.
 4. Frozen fallback archives are **not write targets**; on value divergence, the SSOT
    wins — report it rather than editing the archive.
 
+### 写后验证的完整断言集（缺一不可）
+
+「条目数对了」远不够——一次足以毁掉全部附件的写入也会让条目数保持不变。任何脚本化写库
+后在**全新进程**中断言这一组，任一不达标即视为写入失败并回滚：
+
+| 断言 | 防的是 |
+|:--|:--|
+| 条目数 == 预期 | 误删 / 未落盘 |
+| `(附件总数, 非空附件数, 非空总字节)` 三者都 ≥ 写入前 | XML 往返类整库附件清零（陷阱 7） |
+| 无同名附件重复（每 `filename` 恰好 1 条） | `add_attachment` 追加语义造成的双份（陷阱 13） |
+| 目标 attribute 全量 == 权威源（服务端 / 创建时落盘值） | 只改对了一半、值截断、世代过期 |
+| 目标 attribute == 另一库同名条目（双库场景） | 两库不同步 |
+| 无明文泄漏（私钥内容不得出现在条目 XML 里） | `add_attachment` 误传 data 而非 id |
+
+在**副本**上先跑通再覆盖生产库；覆盖前保留一份可开的历史备份，并在结尾重新打开该备份确认
+条目数等于写入前的值——一个打不开的备份等于没有备份。
+
 ## Sync topology & semantics (headless KeeShare for <host-01>)
 
 The sync container (`Combined_Sync.kdbx`, on the NAS) is the **first landing point
@@ -157,13 +174,47 @@ container-side (pitfall 12).
 `~/.hermes/scripts/keepass-sync.sh` (cron every 120m) is a thin wrapper over
 `private/scripts/keepass-sync.py`, which implements a headless KeeShare-equivalent:
 
-- **Match by UUID**, not (group, title) — location-independent, the KeeShare way.
+- **Match by UUID, not (group, title)** — location-independent, the KeeShare way.
+  **But UUID alone is not sufficient identity: it must survive a veto layer plus a
+  weighted calibration before a merge or delete is allowed.** KeePass's own
+  `<DeletedObjects>` list stores a deleted UUID *permanently*, so a UUID-only
+  implementation deletes or overwrites any entry later re-introduced under it —
+  upstream KeeShare has multiple data-loss reports from exactly this. Layered check:
+  1. **Veto fields (must all match, no voting):** attachment set as
+     `(filename, sha256)`; `password` sha256 when both non-empty; `username` when both
+     non-empty. A different signing key or a different secret is a *different
+     credential*, not an edited one.
+  2. **Weighted vote (only if vetoes pass):** `username` 2, `url` 1.5, `title` 1,
+     `notes` 1, `password` 1 — only fields non-empty on BOTH sides enter the
+     denominator.
+  3. **Verdicts at a 0.60 threshold:** `≥0.60` = SAME (merge normally, LWW by `mtime`);
+     `(0, 0.60)` = **SUSPECT — do not touch, report the field-level diff for the user to
+     adjudicate**; `0` = **UUID REUSE** (different credentials share a UUID) — forbid
+     merge AND forbid delete, report as corruption.
+
+  Worked calibration, so the threshold stays auditable: renamed + rotated secret →
+  username 2 + url 1.5 + notes 1 = 4.5/5.5 = **82%** → merge; renamed + rotated + moved
+  host → 2/5.5 = **36%** → SUSPECT. The point of the middle band is that a big edit
+  under a matching UUID must stop for a human, never auto-LWW.
 - **Merge in time order (LWW by `mtime`)**; the loser's state is appended to the
-  winner's history (`Entry.save_history`), never discarded.
+  winner's history (`Entry.save_history`), never discarded. Save history on the
+  *target* entry before mutating it (pitfall 15).
+- **Deletions need tombstones; a tombstone is not automatically a broadcast.** Store it
+  in the native KDBX `<DeletedObjects>` list (pykeepass exposes the tree via `kp.tree`;
+  there is no `deleted_objects` property). Default: **local suppression only** — the
+  entry is not pulled back, the container copy is left as an archive. Pushing the
+  deletion container-ward is a separate explicit opt-in, scoped to named UUIDs, never a
+  blanket broadcast. A blanket broadcast is what causes the upstream data-loss reports:
+  the next device merges the deletion and destroys an unrelated entry that happens to
+  carry the same UUID.
+- **Exclude `Recycle Bin/**` from every index** (entries, title index, UUID index).
+  Recycled entries keep live UUIDs and are otherwise resurrected or merged into — the
+  measured case had 63 recycle corpses participating in matching.
 - **Deletion reports, never auto-executes.** Default output lists delete-candidates;
   `--apply-deletes` is the agent's explicit decision. Rationale: this runs unattended
   where an irreversible delete has no one to stop it, and interactively where the
-  agent has the context to decide — the script surfaces facts, the agent decides.
+  agent has the context to decide — the script surfaces facts, the agent decides. An
+  entry created in the current run must never also appear as a delete candidate in it.
 - **Asymmetric scope, deliberately**: pull covers the whole container payload; push
   is scoped to `Sync/**` (the whole KeeShare payload), both directions ON by default
   and applied as ONE transaction — this script is this box's KeeShare, so a split
@@ -250,13 +301,28 @@ rm -f /tmp/sudo-job.sh
    "修复"一个本来完好的条目。判定值是否正确只认一条路：`keepassxc-cli export DB >
    /tmp/x.xml` 后用正则从 XML 取 `<Value>`，再与权威源（服务端 `--show-secret`、创建时
    落盘的 kv 文件）做**等值**比较。写入后的读回校验同理，不能以 `show` 输出为准。
-7. **`keepassxc-cli 2.7.x` 的 `edit` 不支持自定义 attribute**（只有 username/url/notes/
-   password）。给条目加 attribute 的可行路径是 XML 往返：export → 在目标 `<Entry>` 的
-   **主块**内（`<History>` 之前，否则会写进历史副本）插入
-   `<String><Key>K</Key><Value>V</Value></String>` → `keepassxc-cli import -p` 生成新库
-   （`-p` 后需喂两遍密码，`import` 到已存在文件会拒绝）→ 校验后替换。写前备份 kdbx。
-   主块与历史块的 `<Key>` 序列会重复出现，锚点要选主块内唯一的 attribute；批量改值用
-   `re.sub(..., count=1)` 定向替换，改完数一次 occurrence 总数防误伤。
+7. **绝不要用 `keepassxc-cli` 的 XML 往返来改条目——它会静默摧毁全部附件。**
+   `keepassxc-cli 2.7.x` 的 `edit` 不支持自定义 attribute，于是容易想到
+   `export DB > x.xml` → 编辑 XML → `import`。**这条路会毁库**：`export` 不导出 Binary
+   池（XML 里没有 `<Binaries>` 节点），但条目级的 `<Value Ref="…">` 引用全部保留；
+   `import` 于是把每个附件重建为 **0 字节的悬空引用**，而 `rc=0` 照样报成功。实测：
+   30 条附件中 20 条有内容（8,558 B）经一次往返全部归零、池 12→2 个空槽；这类脚本的
+   自检通常只查 attribute 值和条目数，所以报"成功"。
+
+   **给条目加/改 attribute 只用 pykeepass**（`Entry.set_custom_property(k, v)` +
+   `kp.save()`），它在 API 层写 XML、不触碰 Binary 池。
+
+   **任何脚本化写库之后，必须在全新进程里断言附件未回退**，而不只是看条目数：
+   ```python
+   # (附件总数, 非空附件数, 非空总字节) 三者都不得低于写入前
+   n = nz = tot = 0
+   for e in kp.entries:
+       for a in (e.attachments or []):
+           d = bytes(a.data or b'')
+           n += 1
+           if d: nz += 1; tot += len(d)
+   ```
+   只看"条目数对不对"会漏掉这个整库级损坏。
 
 ## Pitfalls
 
@@ -354,6 +420,16 @@ rm -f /tmp/sudo-job.sh
      already poisoned, strip every `<Binary>` child of the entry element, `kp.save()`,
      reopen, then re-add with the two-step sequence above.
    - `Entry.delete_attachment(att)` works. `PyKeePass.remove_attachment` does **not** exist.
+   - **`add_attachment` APPENDS; it never replaces a same-named attachment.** Repairing an
+     entry that already carries a 0-byte `<name>` by adding content under the same
+     filename leaves the entry holding BOTH (`[('key.sec',0), ('key.sec',192)]`), and a
+     verifier reading `attachments[0]` then reports the stale one and rejects a correct
+     repair. Delete every attachment whose filename matches first, then add once —
+     and make verification aggregate by filename (`len([a for a in e.attachments if
+     a.filename == f]) == 1`) rather than indexing.
+   - **`add_binary` must be called on the database, not the entry** — `kp.add_binary(data)`
+     then `entry.add_attachment(bid, name)`. Reading `att.data` back always returns bytes;
+     wrap in `bytes(...)` before hashing so `sha256` does not receive `bytearray`.
    - The native shape is `<Entry><Binary><Key>name</Key><Value Ref="2"/></Binary>` — the
      `<Binary>` nodes are **direct children of `<Entry>`**. `kp.binaries` is a **list** in
      4.2.0, indexed by the int in `Ref`. A `<Binary>` placed inside an `<Attachments>`
@@ -445,6 +521,48 @@ rm -f /tmp/sudo-job.sh
    confusion — always sanity-check a zero result against an expected non-zero baseline
    before believing it.
 
+23. **A service's keys belong in ONE entry as named attributes — scattered per-key
+   entries are a schema violation to be merged, and the merge target is the entry whose
+   attributes already match the live service.** The correct shape for an object store is
+   a single service entry holding `AccessKeyId_<role>` / `SecretAccessKey_<role>` pairs
+   plus endpoint/bucket, never one entry per key with the secret in the Password field.
+   Two failure modes ride together here:
+   - **Naming vs role drift.** Attribute suffixes drift out of sync with the names the
+     service actually uses (`_rw` holding the key the server calls `nix-rw`; `_ro`
+     holding a generation the server has never heard of while the true read-only key
+     lives only in a scattered entry). Do not trust the suffix — map each attribute
+     value to the **server's** key list by exact comparison and rename/extend from that.
+   - **A stale-but-right-length value looks fine.** An attribute can hold a value that
+     is the correct *shape* but a dead *generation*; only an exact comparison against
+     the authority distinguishes them. Derive the truth from the service itself
+     (`<tool> key list` + `key info --show-secret`), and cross-check against a live
+     consumer's config (e.g. an `~/.aws/credentials` profile or a kv file on a machine
+     that actually authenticates) — a consumer disagreeing with the vault means the
+     vault entry is stale.
+
+   Order that survives the operation: **inventory both dbs and the server into one
+   table (location → value hash) → fix values/attributes → delete scatter → verify in a
+   fresh process that every attribute equals server truth AND equals the other db's
+   copy → check no consumer reads the entries by title before deleting them.** Deleting
+   a scattered entry can break a consumer that reads it by path; grep the fleet for both
+   the entry title and the attribute names first. Attributes are usually the stable
+   interface (`read`/`write` by attribute name in automation) even when the entries
+   carrying them are redundant — keep attribute names, correct their values.
+
+24. **A shared kdbx on a network share can be rewritten by an unseen writer ~15–25 s
+   after your write — verify against the server, and treat a revert as an external
+   actor, not a bug in your code.** On CIFS/SMB the client cache is not the evidence:
+   compare the sha256 on the *server* path after the write and again a minute later. A
+   file that matches at T+1s and differs by T+15s with no process holding it locally
+   means another device or service owns a copy. Fingerprints worth capturing before
+   concluding anything: the server-side `nlink` (a second link under a recycle/`#recycle`
+   tree is Synology's atomic-write temp file), the size sequence across reverts (differing
+   byte counts for the same logical content = a process re-serialising its own in-memory
+   copy), and `lsof`/`fuser` on both the client and the server side. Do **not** respond by
+   writing in a loop — repeated clobbering corrupts the store. Report the writer and stop.
+   Ordering note: check the sync cron's schedule before writing `Sync/**` at all; a write
+   landing inside the cron's window will be merged by it mid-flight.
+
 ## References
 
 - `references/ssh-key-domain-model.md` — SSH fleet/kin/external key domains, vault placement, config block
@@ -454,3 +572,4 @@ rm -f /tmp/sudo-job.sh
 - `references/fleet-git-credential-helper.md` — Non-interactive git auth from the vault
 - `references/keepass-declarative-interface.md` — KeePassXC ↔ Guix/Nix boundary: value classes inside one entry, reference-by-path resolver (Pattern A, fleet standard), rejected build-time injection (B), topology-embedding drift rule (C), per-entry schema cheat-sheet, pykeepass read-only recipes
 - `scripts/keepass-query.sh` — KeePass lookup helper
+- `scripts/verify-kdbx-write.py` — **mandatory post-write assertion suite** (run it in a fresh process after ANY scripted kdbx write): entry count, the `(total, nonzero, bytes)` attachment triple, duplicate-filename detection, and baseline regression / wipe-fuse checks. Exits non-zero on damage; prints attribute values as length+hash only
