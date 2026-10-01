@@ -83,7 +83,6 @@ astra-sre (orchestrator)
 - **Read-only.** Zero risk to production.
 - Action: `cd ~/.astra/repos/astra-sre && uv run python3 scripts/health-scan.py`
 - Cron: `no_agent` mode (script stdout delivered verbatim — no LLM). Wrapper at `~/.hermes/scripts/astra-sre-scan.sh` uses `uv run` for clean Python dependency isolation — do NOT use system python or hardcoded venv paths.
-- Deployment details: See `references/deployment.md` for cron config, default-room thread, device access matrix, Phase 1 checklist, and the no_agent conversion rationale.
 - **Separate concern:** The hourly service-level health check (MCPs, APIs, DB) lives under the `service-inventory` skill — it's the complement to astra-sre's device-level scan, not part of it.
 
 ### 🥈 Phase 2 — Diagnostics + Knowledge Base
@@ -360,4 +359,3 @@ Check SOUL.md for staleness whenever:
 |:-----|:--------|
 | `references/phase3-design.md` | Full Phase 3 design: L1/L2/L3 levels, lock mechanism, existing skill integration plan (British English) |
 | `references/ecosystem-survey.md` | Survey of which services map to which devices and sub-skills |
-| `references/deployment.md` | Cron config, default-room thread IDs, Phase 1 checklist |
