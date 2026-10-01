@@ -305,6 +305,46 @@ def main() -> int:
     r = H.on_pre_tool_call("process", {"action": "kill", "session_id": "x"}, session_id=sid)
     check("research: process kill blocked", r is not None and r.get("action") == "block", str(r))
 
+    print("== 8. Kernel-path session resolution (task→session observation) ==")
+    # The execute_code kernel drops session_id but keeps task_id. Resolution
+    # must follow the observed binding, not misread it as no_task.
+    H._TASK_SESSION_MAP.clear()
+    ksid, ktask = "itest-kern", "task-kern-1"
+    # (a) Bind: a hook that carries BOTH sid and task records the mapping.
+    H.on_pre_tool_call("terminal", {"command": "ls"}, session_id=ksid, task_id=ktask)
+    check("bind recorded", H._TASK_SESSION_MAP.get(ktask) == ksid,
+          str(H._TASK_SESSION_MAP))
+    # (b) Resolve: a kernel call (empty session, same task) resolves to ksid.
+    resolved = H._session_from_kwargs({"session_id": "", "task_id": ktask})
+    check("kernel call resolves via task", resolved == ksid, str(resolved))
+    # (c) A resolved session reads its REAL phase — ssh allowed in modifying,
+    #     proving it is not falling back to no_task.
+    S.reset(ksid)
+    S.set_phase(S.Phase.MODIFYING, "test", ksid)
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host 'ls'"},
+                           session_id="", task_id=ktask)
+    check("kernel ssh uses real phase (allowed)", r is None, str(r))
+    # (d) Unresolved (never bound) → None → fail-closed no_task, ssh blocked.
+    H._TASK_SESSION_MAP.clear()
+    resolved = H._session_from_kwargs({"session_id": "", "task_id": "task-unknown"})
+    check("unbound resolves to None", resolved is None, str(resolved))
+    r = H.on_pre_tool_call("terminal", {"command": "ssh host 'ls'"},
+                           session_id="", task_id="task-unknown")
+    check("unresolved kernel ssh fail-closed (blocked)",
+          r is not None and r.get("action") == "block", str(r))
+    # (e) Concurrent isolation: distinct task_ids resolve to distinct sessions.
+    H._TASK_SESSION_MAP.clear()
+    sa, sb = "sess-A", "sess-B"
+    H.on_pre_tool_call("terminal", {"command": "ls"}, session_id=sa, task_id="task-A")
+    H.on_pre_tool_call("terminal", {"command": "ls"}, session_id=sb, task_id="task-B")
+    check("isolation: task-A → sess-A",
+          H._session_from_kwargs({"session_id": "", "task_id": "task-A"}) == sa)
+    check("isolation: task-B → sess-B",
+          H._session_from_kwargs({"session_id": "", "task_id": "task-B"}) == sb)
+    check("no cross-session leak",
+          H._session_from_kwargs({"session_id": "", "task_id": "task-A"}) != sb)
+    H._TASK_SESSION_MAP.clear()
+
     print()
     print(f"RESULT: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
