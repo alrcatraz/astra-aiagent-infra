@@ -79,3 +79,13 @@ Also triggered by: 改配置、重启、升级、迁移、重构、删除、修�
    git push origin --delete master  # 删除远端的 master
    ```
    最佳实践：在 `git remote add origin` 之后、第一次 `git push` 之前，先验证分支名一致性——`git branch --show-current` 确认当前分支，`git ls-remote --symref origin HEAD` 确认远端默认分支。本地名字不同的先改名再推送。
+
+- **A gate claimed before it was run is a false result, not a small lie.** Commit messages, PR bodies
+  and reports have to quote a verification that actually executed. If the checker cannot start —
+  missing module, wrong interpreter, absent tool — the honest state is **BLOCKED**, and the fix is to
+  run it properly, not to write the expected outcome. On this host `python3` has no `yaml`, so project
+  validators go through `uv run --with pyyaml --quiet python scripts/<validator>.py`; the evidence is
+  the exit code plus the script's own verdict line, quoted afterwards.
+- **Same trap one level up: a passing-looking transcript is not a passing check.** Output filters can
+  mask credential-shaped text as `***`, and truncation can drop the failing line. Re-read the raw
+  bytes or re-run with the verdict line isolated before asserting anything about the content.

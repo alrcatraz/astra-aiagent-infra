@@ -45,6 +45,24 @@ Same protocol, different store: bridge to entries at `git/https/<host>/<username
 
 ## Pitfalls
 
+- **Git hands the host WITH the port; a bare-host `case` match silently misses.** A
+  remote like `http://forge.internal:3000/user/repo.git` makes git send
+  `host=forge.internal:3000`. A router that case-matches `forge.internal` does not fire,
+  the helper exits 0, and the next helper in the chain (a GUI manager) is consulted
+  instead — producing its own unrelated failure (`Must specify at least one
+  OAuthAuthenticationModes`, then `could not read Username`), which reads exactly like a
+  wrong password. Route on the stripped value and pass the stripped host to the child that
+  checks it too:
+  ```bash
+  case "${HOST%%:*}" in
+      forge.internal) GIT_HOST="${HOST%%:*}" GIT_USER_HINT="$USERNAME" \
+          exec "$HOME/.hermes/scripts/git-credential-<forge>.sh" ;;
+  esac
+  ```
+  Probe with `GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin` before believing any
+  auth failure: it returns the ref on success and never hangs on a prompt. A warm key
+  cache proves nothing here — decryption can succeed while the helper is never reached.
+
 - **Pinned-runtime GUI managers break on rolling distros** (e.g. GCM's dotnet tool pinned
   to net8.0 while Tumbleweed ships .NET 10): every HTTPS op prints a .NET install error
   and hangs on interactive prompt. Do NOT chase the runtime — route credentials
