@@ -1,7 +1,7 @@
 ---
 name: credential-store-management
 description: "Load BEFORE any task that authenticates to a device/service — reading, saving, or rotating passwords, tokens, keys. Store-agnostic three-layer protocol (bootstrap env → SSOT vault → consumers) with pluggable backends; lookup order, field discipline, save protocol, symptom triggers (403, auth fail)."
-version: 2.0.0+alrcatraz.0.0.0
+version: 2.0.0+alrcatraz.0.1.1
 author: alrcatraz
 
 platforms: [linux, synology-dsm]
@@ -102,6 +102,18 @@ A vault whose Password field holds a non-password (token) is a schema smell — 
 re-file as attributes. Likewise, scattered per-key entries for one service should be
 merged into a single service entry with each key as a named attribute.
 
+**Device entries are the exception to the UserName+Password row: their per-user
+credentials live in custom attributes and the built-in fields stay EMPTY.** A device
+entry models *many* identities (login user, root, service accounts), so packing one into
+`UserName`/`Password` can only represent one of them and leaves the rest homeless. The
+user's standing convention: **one custom attribute per user identity**, each packing
+`user` + `pass` + `groups`/privilege, with **root as its own attribute** (it must carry
+the root password — this is where `su`/`sudo` escalation resolves from). The built-in
+`UserName`/`Password` fields are left empty so there is exactly one place to look for a
+password — the attribute named for the account, never a bare field. An entry whose
+`Password` field is non-empty alongside account attributes is a schema violation: migrate
+the value into the right attribute, clear the field, then re-verify.
+
 ## Layout conventions (KeePassXC backend)
 
 Machine-readable subtree under a dedicated group (e.g. `Sync/Fleet/`), separated from
@@ -199,9 +211,31 @@ container-side (pitfall 12).
 - **Merge in time order (LWW by `mtime`)**; the loser's state is appended to the
   winner's history (`Entry.save_history`), never discarded. Save history on the
   *target* entry before mutating it (pitfall 15).
+- **Every agent-side field/attribute write MUST bump the entry's `mtime` — otherwise the
+  next sync's LWW hands the win back to the container's stale copy.** A value written
+  without touching mtime looks "not newer"; the container copy (strictly newer, often
+  from an earlier push) overwrites it on the very next cron run, and the write silently
+  reverts while every local check between the two syncs passes. This was measured twice
+  before the rule stuck (root-attribute writeback reverted; `user_alrcatraz` writeback
+  reverted). Set `entry.mtime = <aware UTC now>` (the setter requires a tz-aware
+  datetime — naive raises TypeError) in the same save as the value change, then verify
+  convergence with a post-sync read, not a pre-sync one.
 - **Deletions need tombstones; a tombstone is not automatically a broadcast.** Store it
   in the native KDBX `<DeletedObjects>` list (pykeepass exposes the tree via `kp.tree`;
-  there is no `deleted_objects` property). Default: **local suppression only** — the
+  there is no `deleted_objects` property). **The tombstone MUST record the CONTAINER-side
+  UUID, not the local copy's UUID.** The pull path rebuilds an add as a brand-new entry
+  (`loc.add_entry(...)` generates a fresh uuid every time), and suppression is keyed on
+  `str(container_entry.uuid)` — so tombstoning the local uuid you just deleted does
+  nothing: each run re-adds the container twin under yet another fresh uuid and the
+  resurrection loop never ends (three generations were measured before this was caught).
+  Obtain the container twin's uuid by *dumping* the container db (pykeepass, container
+  password) and selecting on the container's own path shape — the container layout does
+  NOT mirror local paths, and the sync script's own `gpath`/`to_local_group` helpers add
+  layers (`gpath` = local-style group with title stripped; `to_local_group` then prefixes
+  `LOCAL_ROOT`) — comparing the wrong pair of strings yields an empty selection every
+  time. Prove the fix by the sync decision line: `tombstones-suppressed=N` with `add=0`
+  across consecutive runs, plus a fresh-process assert that `flat_level` (or the twin's
+  group) no longer contains the entry. Default: **local suppression only** — the
   entry is not pulled back, the container copy is left as an archive. Pushing the
   deletion container-ward is a separate explicit opt-in, scoped to named UUIDs, never a
   blanket broadcast. A blanket broadcast is what causes the upstream data-loss reports:
@@ -221,13 +255,27 @@ container-side (pitfall 12).
   pull/push (or a scope mismatch) can never converge. The phone-shared container still
   must never receive machine-domain (L0) entries, which live outside `Sync/`.
 - **Same-title / different-UUID pairs are ONE entry with a forked identity, never two
-  entries.** Unify them with **relink** — set the local entry's `uuid` to the container's
-  UUID (or vice versa) so both sides match 1:1 — and never by deleting either copy:
-  both copies are real (often one copy carries an attachment the other lacks, e.g. a
-  signing key), and deleting silently drops credentials from one db. Decide which
-  identity wins first, then relink, then re-verify by reopening both dbs in a fresh
-  process. If content actually differs (different keys/URLs), stop and surface it for
-  the user to adjudicate — do not LWW it away.
+  entries.** The usual cause is an add path that mints a fresh UUID instead of carrying
+  the source's — pykeepass creates uuid1 by default, so every scripted bulk import forks
+  the identity of everything it touches, and each fork is both a permanent
+  duplicate-report pair and a resurrection vector: deleting one copy leaves the twin live
+  under an identity no deletion record names. **Prevention: stamp the source uuid onto
+  every created entry** (`ne.uuid = src.uuid` immediately after `add_entry`, both
+  directions). Repair: unify with **relink** — set the local entry's `uuid` to the
+  container's UUID (the container wins: it is the hub every KeeShare member merges from)
+  — and never by deleting either copy: both copies are real (often one carries an
+  attachment the other lacks, e.g. a signing key), and deleting silently drops
+  credentials from one db. Then re-verify by reopening both dbs in a fresh process. If
+  content actually differs (different keys/URLs), stop and surface it for the user to
+  adjudicate — do not LWW it away. When the container holds two copies of the same title
+  the pair is ambiguous: relink only on an exactly-one match, and prune the redundant
+  copy separately, requiring its content signature to equal the identity kept.
+- **Never export a zombie, and never let a dead flag gate an apply block.** A live entry
+  whose own db already records its uuid in `<DeletedObjects>` re-seeds the whole fleet on
+  every merge, so the deletion can never complete; skip such uuids in BOTH directions and
+  check that the push branch actually consults its `--push` flag (an apply block gated on
+  `if push or propagate:` pushes on every unflagged cron run). See
+  `keepassxc-fleet-ops` — "Zombie entries".
 
 **Delete candidates must be scoped to the shared subtree.** The container holds only
 the `Sync/` payload while the local db holds the whole `Alrcatraz/` tree (including
@@ -268,25 +316,98 @@ argument** together with `--passphrase-fd 0`; never `cat file | gpg --passphrase
 (stdin collision mangles the passphrase → corrupt ciphertext). Always re-decrypt and
 verify round-trip before deleting backups. Details: `references/gpg-credential-edit-workflow.md`.
 
-## Practical Workflow: Device Sudo Access
+### Forgejo/Gitea API writes: the git credential is not an API credential
 
-1. Resolve the device entry in the SSOT; its Password field is the login/sudo password.
-   Device keys are lowercase-no-spaces hostnames.
-2. Execute via the **only pattern that survives Hermes terminal's security layer** —
-   standalone temp script, never pipe-into-shell-construct:
+`git credential fill` for the forge host returns a credential that works for `git push` and **fails every
+API call with 401** — it is a git-protocol credential minted by the desktop credential manager, not a PAT.
+Diagnosing this costs a round of "the PR was rejected" when git itself is fine.
 
-```bash
-cat > /tmp/sudo-job.sh << 'SCRIPT'
-systemctl restart <unit>
-SCRIPT
-chmod +x /tmp/sudo-job.sh
-echo "$DEVICE_PASS" | sudo -S /tmp/sudo-job.sh
-rm -f /tmp/sudo-job.sh
+For API writes (create/merge a pull request, edit repo settings) read the PAT from the SSOT attribute and
+use it **in-process, never printed**:
+
+```python
+# ~/.hermes/hermes-agent/venv/bin/python  (kernel python lacks pykeepass)
+kp = pykeepass.PyKeePass(DB, password=KP_PASS)
+e  = kp.find_entries(title="<forge entry title>", first=True)   # no `recurse=` kwarg in 4.x
+tok = e.custom_properties["<pat attribute name>"]                # attribute, never the Password field
+requests.post(BASE + "/repos/<owner>/<repo>/pulls", headers={"Authorization": "token " + tok}, json=...)
 ```
 
-   ❌ `echo "$PASS" | sudo -S tee/sh -c ...` → `sudo_auth_failed` even with the right
-   password. `SUDO_ASKPASS` is also blocked (terminal forces `-S`). On remote hosts wrap
+Two failure shapes seen: `find_entries(..., recurse=True)` raises `TypeError: Invalid keyword argument`
+in pykeepass 4.2 (the parameter does not exist), and a bare `-a Password` read on such an entry returns the
+account password rather than the PAT — the PAT lives in a **custom attribute**, per the field discipline.
+
+## Practical Workflow: Device Sudo Access
+
+1. Resolve the device entry in the SSOT, then read the **account attribute that carries
+   the identity you need** — the root/sudo password lives in the `root` attribute, not in
+   the built-in `UserName`/`Password` fields (see Field discipline above: device entries
+   leave those fields empty). Do not fall back to the `Password` field "just in case" —
+   if there is no `root`/`<user>` attribute, the credential is **missing**, not wrong.
+   Device keys are lowercase-no-spaces hostnames.
+2. **`-a Password` returning EMPTY on a device entry is the EXPECTED shape, not a
+   missing credential** — device entries leave the built-in Password field blank by
+   design (Field discipline: one attribute per identity, `root` as its own). Do not
+   re-search for a "correct" entry title, and do not conclude the credential is gone.
+   Dump the entry's KEY names via XML (`keepassxc-cli export DB` →
+   `re.finditer(r'<Key>([^<]+)</Key>', blk)`) and pick the attribute for the identity
+   you need (`root` for sudo, `user_<name>` for a named login). This is the practical
+   trigger for pitfall 21's "the right field" step — a bare `-a Password` read on a
+   device entry looks like "DPW_EMPTY" and sends you hunting a title that was correct
+   all along.
+3. Execute via a pattern that survives Hermes terminal's security layer. The
+   ban is on **shell constructs**, not on piping itself — `sudo -S` reads the
+   password as the FIRST line of stdin, so anything else that consumes stdin
+   races it for that line:
+
+```bash
+# ✅ single real command, body in a FILE (not stdin) — verified working
+printf '%s\n' "$DEVICE_PASS" | sudo -S bash /tmp/sudo-job.sh
+
+# ❌ shell construct racing sudo for stdin → sudo_auth_failed (even with the
+#    right password):  echo "$PASS" | sudo -S tee / sh -c '...'
+# ❌ heredoc around the read: the heredoc occupies stdin, so the password
+#    pipe delivers SCRIPT TEXT instead — 7 failed attempts traced to this;
+#    the SSH leg needs only ONE line, since the script is scp'd ahead.
+# ❌ -tt: `read -r PW` echoes the password to stdout AND fights sudo for stdin
+```
+
+   `SUDO_ASKPASS` is also blocked (terminal forces `-S`). On remote hosts wrap
    inner commands in `sh -c '...'` inside the script to survive SSH quoting.
+
+   **Batch loops (many `sudo` invocations): prime the timestamp once inside a
+   `setsid` session, then `sudo -n` the rest — verified on a 223-path bake:**
+   ```bash
+   # single setsid session = single sudo timestamp scope; `sudo -n` then
+   # reuses it for every loop iteration (timestamps are per-session, so a
+   # prime OUTSIDE the setsid does NOT apply to commands inside it)
+   setsid bash -c 'read -r P; printf "%s\n" "$P" | sudo -S -k true \
+     && echo AUTH_OK' <<<"$DEVICE_PASS"
+   setsid bash /tmp/batch-loop.sh "$DEVICE_PASS"   # inside: sudo -n per item
+   ```
+   The three root causes this avoids (each failed separately): heredoc eating
+   stdin, sudo timestamps not crossing SSH sessions, and `-tt` echoing the
+   password. Each of those produced the SAME `sudo_auth_failed`-shaped error as
+   a genuinely wrong password — so before believing a rejection, rule the
+   delivery mechanism out first (pitfall 21's lookup-vs-value discipline
+   applies to passwords delivered over a channel, not just to fields in a db).
+
+3. **Remote host — same pattern, one SSH leg added.** `scp` the standalone script to
+   the target, then pipe the password through **ssh stdin** so it never appears on the
+   ssh command line (which lands in `ps`/shell history on both ends):
+   ```bash
+   scp -P <port> /tmp/sudo-job.sh <user>@<host>:/tmp/sudo-job.sh
+   printf '%s' "$DEVICE_PASS" | ssh -p <port> <user>@<host> \
+     'chmod +x /tmp/sudo-job.sh; sudo -S /tmp/sudo-job.sh 2>&1; rm -f /tmp/sudo-job.sh'
+   ```
+   The password stays in-process (read from the vault XML in the same Python process
+   that consumes it) — never echo it to the transcript, never inline it in the command.
+4. **Phase toggling across a read→write→verify cycle.** The discipline gate assigns one
+   phase per operation kind: `accessing_device` for SSH/scp reads, `executing` for the
+   write itself. Each segment opens with its own `discipline_set_phase` call (transient
+   phases auto-revert); do not expect one phase to cover read+write. If the same SSH
+   shape is refused twice with the same message, stop and re-read the phase rather than
+   re-running it a third time.
 
 ## KeePassXC CLI 写入/读取陷阱（keepassxc-cli 2.7.x，实测于 <host-01>）
 
@@ -323,6 +444,62 @@ rm -f /tmp/sudo-job.sh
            if d: nz += 1; tot += len(d)
    ```
    只看"条目数对不对"会漏掉这个整库级损坏。
+
+## Doc scrub: from plaintext to semantic handles
+
+Documentation drifts into carrying values. When you find them, do not replace every hit with
+one generic placeholder — **one value is usually several credentials**. Locate each value in
+the vault first (entry path + field), then replace it with the handle that names the role the
+sentence is using:
+
+| Where it appears | Handle | Vault anchor (typical) |
+|:--|:--|:--|
+| device `root` / `user_<name>` usage, `sudo`, `su -S` | `<fleet-sudo-password>` | `Sync/Fleet/Devices/<domain>/<device>` → attribute `root` |
+| `sshpass -p`, `ssh` password auth, `xfreerdp /p:` | `<fleet-ssh-password>` | same entry, attribute `user_<name>` |
+| EasyTier `network_secret` | `<easytier-network-secret>` | `Sync/Passwords/EasyTier` |
+| dashboard login (`MD5(password)`, argon2 pre-hash) | `<easytier-dashboard-password>` | `Sync/Passwords/ET Interconnect` |
+| Postgres/connection string | `<ztnet-db-password>` | the service entry's attribute |
+| the user's personal password reused for a host | `<vps-uk-password>`-style role name | `Sync/Passwords/<service>` |
+
+Then add **one** provenance line per markdown file ("handles resolve from KeePassXC; see
+`credential-store-management`"), not one per hit.
+
+Verification loop — a fresh process each time, and the counts are the evidence:
+
+1. Scan the whole tree for the literal across *every* extension and report `file:count`.
+2. Apply, replace, rescan → must be `0`.
+3. Frontmatter still parses on every touched `.md` (insert the provenance line *after* the
+   frontmatter block, never at byte 0 of a skill file).
+4. Non-markdown carriers (`.py`, `.json`, `.yaml`) get the value swapped but **no comment
+   line** — a provenance comment is a syntax error there; validate with `py_compile` /
+   `json.load` instead.
+5. `hermes skills list` still shows the same enabled count.
+
+Traps measured in the field:
+
+- **Suffix filters hide carriers.** Scanning `*.md|*.py|*.json` missed two `*.md.bak` editor
+  backups that still held the value. Scan by content over all files, then classify.
+- **`.gitignore`d but tracked.** An archive directory can be tracked yet ignored, so `git add`
+  refuses while `git status` shows modifications. Use `git add -f` — and then check you did not
+  sweep in an **embedded git repo** as a gitlink (`git rm --cached <path>` to undo).
+- **Prefix collisions inflate counts.** Scanning both `401503` and `40150` double-counts every
+  occurrence of the longer value; dedupe by matching longest-first in one alternation.
+- **Tool output can show `***` where the file has working code.** The agent runtime redacts
+  credential-*shaped* text in what it returns, so a line like `printf 'user:%s' "$TOKEN"` or
+  `AUTHORIZATION: basic $B64` reads back as `user:***` / `basic ***` — the file is fine, the display
+  is not. Two consequences: (a) do not "repair" a file because its printed content looks mangled —
+  confirm with the raw bytes (hex dump or an in-process equality check between source and target);
+  (b) the same redaction can hide a genuine leak in a scan's *output*, so trust the count the script
+  reports, not what you can read in the transcript.
+- **Scrubbing is not rotation.** The value stays valid in the vault, so every copy already
+  taken (clones, shell history, chat transcripts, git history) remains a live secret. Say so
+  explicitly instead of implying the credential was changed.
+- **Scrubbing without rotation is the accepted posture on this fleet.** The owner's standing
+  decision: desensitise the documents, keep the value — do not re-raise rotation after a scrub.
+  What follows from declining: the handle is a *discipline*, not a *defence*. Since nothing was
+  changed to contain a leak, the value must never reach a public surface (issue text, PR body,
+  published mirror, anything at ≥L2), and a copy that escaped before the scrub stays a live secret
+  by definition.
 
 ## Pitfalls
 
@@ -504,14 +681,34 @@ rm -f /tmp/sudo-job.sh
    about reading that XML correctly; never infer credential validity from `show`
    output alone, live-test the endpoint.
 
-21. **Existence checks must match the attribute that carries the credential, never a
-   fuzzy title substring.** A PAT lives in a *custom attribute* of a service entry
-   (`Gitea - <nas-host>` → `<pat-attribute>`). Searching by
-   `'Gitea <gitea-host>' in e.title` returns **zero** while the credential sits intact, because
-   that string belongs to old schema-violating duplicates, not the canonical entry. The
-   resulting "the credential is gone" alarm is self-inflicted. Correct probe: iterate
-   entries and test `custom_properties` keys for the exact attribute name, then live-test
-   the endpoint. Cross-check BOTH dbs before declaring anything missing (pitfall 12).
+21. **When a stored credential fails a live test, the default hypothesis is a LOOKUP or
+   SCHEMA error, never "the password is wrong."** Reaching for "wrong password" is the
+   reflex that has cost the most time across sessions, and it is almost always wrong:
+   the value was read from a ghost entry instead of the canonical one, from a
+   cross-boundary parse, from a stale pre-sync copy, or from the wrong *field* (the
+   built-in `Password` instead of the `root`/`<user>` attribute). Before believing a
+   rejection, clear this checklist in order:
+   1. **sync first** — pull the container before reading (pitfall 12); a credential added
+      on another device is not local yet;
+   2. **canonical vs ghost** — the entry you read must be the one with the full
+      identifying Notes (connection-paths block, role markers), not a same-title twin;
+   3. **the right field** — resolve the account attribute (`root`, `user_<name>`), not
+      the bare `Password` field (device entries leave it empty by convention);
+   4. **parse integrity** — if you counted more entries or fields than expected, you
+      cross-boundary-parsed; re-derive from `keepassxc-cli search` (authoritative on
+      count) or pykeepass `kp.entries`, never from hand-split XML.
+   Only after all four hold does a rejection mean the *stored value* is stale — and then
+   you report it as stale and ask for the current value rather than guessing. A live
+   test that fails with a *permissions* shape (user exists, in the group, but auth
+   rejected) confirms the lookup path was wrong, not that the password changed.
+
+   Existence checks make the same class of error when they return **zero**: a PAT lives
+   in a *custom attribute* of a service entry (`Gitea - <nas-host>` → `<pat-attribute>`),
+   so searching by `'Gitea <gitea-host>' in e.title` returns zero while the credential
+   sits intact — that string belongs to old schema-violating duplicates, not the
+   canonical entry. Correct probe: iterate entries and test `custom_properties` keys for
+   the exact attribute name, then live-test the endpoint. Cross-check BOTH dbs before
+   declaring anything missing (pitfall 12).
 
 22. **`Entry.path` has NO leading slash — `startswith('/Sync/')` matches nothing.** It is
    a list of group names; join it (`'/'.join(e.path)`) and compare against `'Sync/'`,
@@ -572,6 +769,37 @@ rm -f /tmp/sudo-job.sh
    surface in word-splitting errors instead. Read the single variable you need by name
    (`references/env-variable-extraction.md`) or parse a config file for one key; never
    echo a whole environment block to check whether something is set.
+
+26. **After a reboot the gpg-agent cache is empty, and every pass-backed helper fails
+   non-interactively.** Symptom: git reports `fatal: Failed to decrypt file
+   '~/.password-store/.../<user>.gpg' with gpg. exit=2 … Operation cancelled`, then
+   `could not read Username`. Two traps here. First, `~/.dotnet/tools/git-credential-manager`
+   may be a **pass-backed shim, not real GCM** (~78 KB ELF): URL-scoping the helper chain
+   for the private forge to it changes nothing, because it decrypts the same store. Second,
+   `gpg-agent.conf` often sets `pinentry-program /usr/bin/pinentry-tty`, which cannot prompt
+   in a headless/agent context. Fix without asking the user for a passphrase — Layer-1
+   already holds it (`GPG_Key_*` in `~/.hermes/.env`, and `allow-preset-passphrase` is in the
+   agent config):
+   ```python
+   hexpw = passphrase.encode().hex()
+   for grip in keygrips:  # gpg --with-keygrip --list-secret-keys --with-colons -> "grp" rows
+       subprocess.run(["gpg-connect-agent"],
+           input=f"PRESET_PASSPHRASE {grip} -1 {hexpw}\nBYE\n", text=True)
+   ```
+   **Preset the SUBKEY grips, not just the primary key's.** `PRESET_PASSPHRASE` is
+   per-keygrip and decryption happens with the encryption *subkey*: presetting only the
+   `sec` row's grip reports success for every key and still fails with `gpg rc=2` /
+   `Operation cancelled` on the first `--decrypt`. Collect the `ssb` rows' grips too
+   (`--with-colons` prints `sec`/`ssb` rows each followed by their own `grp` row) and
+   preset the passphrase on all of them. Measured: presetting the two primary grips
+   reported `ok` twice and decryption still failed; adding the two subkey grips gave
+   `decrypt rc=0`.
+   A host whose `~/.hermes/.env` lacks the `GPG_Key_*` lines cannot self-unlock at all —
+   check that first (a Layer-1 gap produces the identical symptom: git says
+   `could not read Username`, gpg says `Operation cancelled`).
+   Verify with a plain `gpg --decrypt <file> >/dev/null` (exit 0, no pinentry), then a real
+   `git ls-remote <private-remote>`. Switch pinentry to `pinentry-gnome3` only for desktop
+   sessions; headless work must rely on the preset, never on a dialog.
 
 ## References
 

@@ -173,50 +173,52 @@ components:
     lifecycle:
       closure:
         - id: vcs-sub-skill-symlinks
-          check: Verify all sub-skill symlinks in Hermes discovery path are reachable
+          check: Verify every sub-skill is reachable through the parent bridge, and that no per-member duplicate bridge exists
           command: >
-            for d in astra-vcs-assist-gpg-key astra-vcs-assist-git-init
-            astra-vcs-assist-git-dev astra-vcs-assist-git-release
-            astra-vcs-assist-git-sync; do
-            test -L "$HOME/.hermes/skills/vcs/$d" -o -d "$HOME/.hermes/skills/vcs/$d"
-            || echo "MISSING: $d"; done
+            for d in gpg/astra-vcs-assist-gpg-key
+            git/skills/astra-vcs-assist-git-init
+            git/skills/astra-vcs-assist-git-dev
+            git/skills/astra-vcs-assist-git-fork
+            git/skills/astra-vcs-assist-git-review
+            git/skills/astra-vcs-assist-git-release
+            git/skills/astra-vcs-assist-git-sync
+            github/astra-vcs-assist-github
+            versioning/astra-vcs-assist-versioning
+            gitea-forgejo/astra-vcs-assist-gitea-forgejo; do
+            test -f "$HOME/.hermes/skills/vcs/astra-vcs-assist/$d/SKILL.md"
+            || echo "MISSING: $d"; done;
+            ls -d "$HOME"/.hermes/skills/vcs/astra-vcs-assist-* 2>/dev/null
+            && echo "DUPLICATE BRIDGE: sub-skills are discovered via the parent link"
           severity: required
           trigger: sub-skill added, removed, or repo path changed
         - id: vcs-routing-coverage
-          check: Verify routing.yaml covers every sub-skill directory
+          check: Verify routing.yaml covers every sub-skill discovered from the tree
           command: >
             cd "$HOME/.astra/repos/astra-vcs-assist" &&
-            for d in git/skills/*/ gpg/*/; do
-            skill=$(basename "$d");
+            find . -mindepth 2 -name SKILL.md | sed 's#/SKILL.md##; s#^\./##'
+            | while read d; do skill=$(basename "$d");
             grep -q "$skill" routing.yaml || echo "UNCOVERED: $skill"; done
           severity: recommended
           trigger: routing.yaml or sub-skill SKILL.md modified
       deploy:
         - id: vcs-register-symlinks
-          check: Register all sub-skill symlinks in Hermes discovery path
+          check: Register the vcs-assist bridge (parent only; sub-skills are discovered through it)
           command: >
             mkdir -p "$HOME/.hermes/skills/vcs" &&
             ln -sfn "$HOME/.astra/repos/astra-vcs-assist"
             "$HOME/.hermes/skills/vcs/astra-vcs-assist" &&
-            for d in gpg/astra-vcs-assist-gpg-key
-            git/skills/astra-vcs-assist-git-init
-            git/skills/astra-vcs-assist-git-dev
-            git/skills/astra-vcs-assist-git-release
-            git/skills/astra-vcs-assist-git-sync; do
-            ln -sfn "$HOME/.astra/repos/astra-vcs-assist/$d"
-            "$HOME/.hermes/skills/vcs/$(basename $d)"; done
+            test ! -e "$HOME/.hermes/skills/vcs/astra-vcs-assist-git-dev" ||
+            echo "DUPLICATE BRIDGE: per-member links must be removed (dual discovery path)"
           severity: required
           trigger: new clone or first deploy of vcs-assist
         - id: vcs-sub-skill-exist
-          check: Verify all sub-skill SKILL.md files exist
+          check: Verify every sub-skill has SKILL.md and its frontmatter name matches the directory name
           command: >
-            for f in SKILL.md
-            gpg/astra-vcs-assist-gpg-key/SKILL.md
-            git/skills/astra-vcs-assist-git-init/SKILL.md
-            git/skills/astra-vcs-assist-git-dev/SKILL.md
-            git/skills/astra-vcs-assist-git-release/SKILL.md
-            git/skills/astra-vcs-assist-git-sync/SKILL.md; do
-            test -f "$HOME/.astra/repos/astra-vcs-assist/$f" || echo "MISSING: $f"; done
+            cd "$HOME/.astra/repos/astra-vcs-assist" &&
+            find . -mindepth 2 -name SKILL.md | sed 's#/SKILL.md##; s#^\./##'
+            | while read d; do
+            n=$(grep -m1 '^name:' "$d/SKILL.md" | awk '{print $2}');
+            test "$(basename "$d")" = "$n" || echo "NAME-MISMATCH: $d != $n"; done
           severity: required
           trigger: deploy or update of vcs-assist
 
@@ -224,9 +226,8 @@ components:
   - type: sre
     name: astra-sre
     repo: alrcatraz/astra-sre
-    local_path: skills/devops/astra-sre/
-    version: 1.0.1
-    description: Unified SRE coordination layer — device inspection, fault diagnosis, auto-repair
+    version: 2.0.0
+    description: Unified SRE coordination layer (macro skill) — health scan, incident triage, guided repair, learning loop; topics live in its own repo
     status: active
     depends_on:
       - repo: alrcatraz/astra-knowledge-base-mcp
