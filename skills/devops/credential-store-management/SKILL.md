@@ -809,9 +809,5 @@ Traps measured in the field:
 - `references/gpg-credential-edit-workflow.md` — GPG YAML edit cycle (archive/legacy backend)
 - `references/fleet-git-credential-helper.md` — Non-interactive git auth from the vault
 - `references/keepass-declarative-interface.md` — KeePassXC ↔ Guix/Nix boundary: value classes inside one entry, reference-by-path resolver (Pattern A, fleet standard), rejected build-time injection (B), topology-embedding drift rule (C), per-entry schema cheat-sheet, pykeepass read-only recipes
-- `references/keepassxc/operations.md` — daily vault operation: headless CLI, dual-container topology, pykeepass traps, zombie entries, a live GUI member reverting a container push, `rm` recycling, additive-dimension push, three-layer backup, scheduler ownership
-- `references/keepassxc/topology-audit-baseline.md` — the vault inventory baseline to audit against
-- `references/keepassxc/vault-sync-semantics.md` — what sync does and does not carry
-- `references/keepassxc/concurrent-writer-attribution.md` — who wrote an entry when two writers exist
 - `scripts/keepass-query.sh` — KeePass lookup helper
 - `scripts/verify-kdbx-write.py` — **mandatory post-write assertion suite** (run it in a fresh process after ANY scripted kdbx write): entry count, the `(total, nonzero, bytes)` attachment triple, duplicate-filename detection, and baseline regression / wipe-fuse checks. Exits non-zero on damage; prints attribute values as length+hash only
